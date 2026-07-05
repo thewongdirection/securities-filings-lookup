@@ -12,6 +12,11 @@ from __future__ import annotations
 import re
 import sys
 
+# Some notes contain Chinese board names; Windows consoles often
+# default to a legacy code page that can't encode them.
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 SUFFIX_MAP = {
     ".HK": "hong_kong",

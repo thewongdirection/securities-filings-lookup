@@ -12,6 +12,8 @@ python scripts/fetch_us_filings.py AAOI --forms 10-Q --limit 1 --save-dir ./fili
 
 `--save-dir` saves each matching filing as a PDF. Since SEC's primary documents are HTML, this launches a real headless browser (Playwright + Chromium) to render and print the actual page — see the main SKILL.md's Step 3 for why that matters and what it replaced. One-time setup: `pip install playwright && playwright install chromium`. Without `--save-dir`, the script just prints the filing list with direct links.
 
+**To *show* a US annual report in an interactive PDF viewer** (which typically can't open local files outside its allowed roots): the 10-K itself is HTML, but many large companies also file their glossy annual report as form **ARS** (Annual Report to Shareholders), which IS a native PDF hosted on sec.gov — `--forms ARS --limit 1` finds it, and the resulting `https://www.sec.gov/Archives/...pdf` URL streams into the viewer fine (tested with JPMorgan's 2025 ARS; the viewer's fetch is not caught by SEC's headless-browser bot detection). Not every company files an ARS (Apple and Tesla don't reliably), so fall back to handing over the 10-K link if the form isn't there.
+
 What it does under the hood:
 1. Downloads `https://www.sec.gov/files/company_tickers.json` (ticker → CIK mapping) and resolves the ticker.
 2. Queries `https://data.sec.gov/submissions/CIK{10-digit-zero-padded-cik}.json`, which returns the company's recent filings (form type, filing date, period, accession number, primary document).

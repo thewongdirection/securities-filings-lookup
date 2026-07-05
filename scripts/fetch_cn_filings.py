@@ -94,13 +94,17 @@ def resolve_org_id(code: str) -> str | None:
 def fetch(code: str, kind: str, limit: int) -> list[dict]:
     plate, column = classify_exchange(code)
     org_id = resolve_org_id(code)
+    # Pass the kind's keyword to the endpoint's own title search rather
+    # than only filtering the most recent page locally -- busy filers
+    # push their annual report out of the recent-50 window within weeks.
+    keywords = KEYWORDS.get(kind, [])
     payload = {
         "pageNum": "1",
         "pageSize": "50",
         "tabName": "fulltext",
         "column": column,
         "stock": f"{code},{org_id}" if org_id else code,
-        "searchkey": "",
+        "searchkey": keywords[0] if keywords else "",
         "secid": "",
         "plate": plate,
         "category": "",

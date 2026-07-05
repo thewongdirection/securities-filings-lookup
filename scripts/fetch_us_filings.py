@@ -55,7 +55,27 @@ def _get_json(url: str) -> dict:
 
 
 def resolve_cik(ticker: str) -> tuple[int, str]:
-    data = _get_json(TICKERS_URL)
+    # The full ticker->CIK mapping is a large file that changes rarely;
+    # re-downloading it every invocation both wastes time and trips
+    # SEC's rate limiting (observed live as HTTP 429) after repeated
+    # runs. Cache it for a day.
+    import tempfile
+    cache = os.path.join(tempfile.gettempdir(), "sec_company_tickers.json")
+    data = None
+    try:
+        if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 86400:
+            with open(cache, encoding="utf-8") as f:
+                data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = None
+    if data is None:
+        raw = _get(TICKERS_URL)
+        data = json.loads(raw.decode())
+        try:
+            with open(cache, "wb") as f:
+                f.write(raw)
+        except OSError:
+            pass
     ticker = ticker.upper()
     for entry in data.values():
         if entry["ticker"].upper() == ticker:

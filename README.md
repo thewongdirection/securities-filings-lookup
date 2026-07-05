@@ -18,10 +18,10 @@ Clone straight into your personal skills directory:
 
 ```bash
 # Mac/Linux
-git clone https://github.com/<you>/securities-filings-lookup.git ~/.claude/skills/securities-filings-lookup
+git clone https://github.com/thewongdirection/securities-filings-lookup.git ~/.claude/skills/securities-filings-lookup
 
 # Windows (PowerShell)
-git clone https://github.com/<you>/securities-filings-lookup.git $env:USERPROFILE\.claude\skills\securities-filings-lookup
+git clone https://github.com/thewongdirection/securities-filings-lookup.git $env:USERPROFILE\.claude\skills\securities-filings-lookup
 ```
 
 Then in any Claude Code session:

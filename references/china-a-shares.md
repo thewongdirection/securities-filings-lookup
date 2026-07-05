@@ -42,7 +42,11 @@ When the skill runs for an A-share ticker, open the latest annual report in the 
 
 ## Language
 
-Filings are almost always **Chinese-only**. Say this to the user up front rather than after retrieving something they can't read. Offer to summarize or translate the relevant section(s) — not a full document dump, both for practicality and to stay within reasonable reproduction limits on the source text.
+Filings are almost always **Chinese-only**. Say this to the user up front rather than after retrieving something they can't read, then deliver an English version alongside the original automatically (see SKILL.md's "Non-English filings" section). Finding one, in order:
+
+1. **Official 英文版 on CNINFO** — the annual-report search results include it when published (title like "2025年年度报告（英文版）"). Kweichow Moutai and Wuliangye publish one; most filers don't.
+2. **The H-share English annual report on HKEXnews** for A+H dual-listed companies (Ping An 601318→2318.HK, CATL 300750→3750.HK, most big banks/insurers) — same company, English, but HKFRS rather than Chinese accounting standards; say so.
+3. **Translate the 摘要 (summary) yourself** when neither exists — extract its text and produce a clearly-labelled unofficial English translation of the summary/key sections in the conversation. Never present a translation as the filing, and don't translate a full report wholesale unless asked.
 
 ## Filing cadence
 

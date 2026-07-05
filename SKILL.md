@@ -51,6 +51,8 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 
 **General principle:** prefer the primary regulator's own system over third-party aggregators. It's free, authoritative, and won't be paywalled or stale.
 
+**Be a polite guest:** these are shared regulator systems, and excessive use can get the user's IP temporarily rate limited — SEC in particular has been observed returning sustained HTTP 429 blocks after many script runs in a day (see `references/us-edgar.md`). Don't re-fetch what you already have in the conversation, don't retry a 429 in a loop (wait several minutes instead), and tell the user plainly when they've been rate limited rather than failing silently.
+
 **Environment matters here.** The bundled scripts shell out to `data.sec.gov` / `cninfo.com.cn` directly, which only works where the shell actually has internet access to those domains (Claude Code, Claude Desktop). In claude.ai's sandboxed code execution, outbound network access is restricted to package registries and does **not** include these filing sources — in that environment, use the `web_search` and `web_fetch` tools instead and follow the same search-then-fetch steps described in each reference file. Try the script first if you're unsure which environment you're in; a network error tells you immediately to fall back to search+fetch.
 
 ## Step 3 — Save the original filing as a PDF

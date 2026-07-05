@@ -22,6 +22,7 @@ What it does under the hood:
 Requirements the script already handles, but worth knowing:
 - SEC's "fair access" policy requires a descriptive `User-Agent` header (e.g. `Company/Contact your-email@domain.com`) — anonymous/browser-spoofed UAs can get 403'd. Customize the `USER_AGENT` constant in the script if you hit this.
 - Rate limit is 10 requests/second; the script already paces itself, no need to add more delay for single lookups.
+- **Heavy repeated use can still get you rate limited beyond the per-second pacing.** Observed live (2026-07): after many script runs in one day, `www.sec.gov` started returning HTTP 429 (Too Many Requests) on `company_tickers.json` — a sustained block lasting several minutes or more, not a momentary throttle — while `data.sec.gov` kept working. The script now caches the ticker→CIK mapping for a day, which removes the main repeat offender, but if you're looking up many tickers or saving many filings in a session, expect SEC may temporarily block you anyway. If a 429 appears: stop retrying in a loop, wait several minutes, and batch remaining lookups. Tell the user their IP is temporarily rate limited by SEC rather than silently failing.
 - If the ticker isn't in `company_tickers.json` (common for very recent IPOs, SPACs, or funds), fall back to searching by company name via EDGAR full text search: `https://www.sec.gov/edgar/search/#/q=<company name>`.
 
 ## Option B — search + fetch (claude.ai sandbox, or when the script's network call fails)

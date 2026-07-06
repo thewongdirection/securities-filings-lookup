@@ -22,6 +22,10 @@ Mechanics, verified live (2026-07, TSMC):
 
 **TLS gotcha:** TWSE's chain is issued by TWCA, missing from some default trust stores (`CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain` seen live on Windows). `pip install certifi` fixes it; the script uses certifi automatically when present.
 
+## Showing a Taiwan filing in the PDF viewer
+
+The step-9 temporary links (`https://doc.twse.com.tw/pdf/<filename>_<timestamp>.pdf`) work in the interactive PDF viewer — generate a fresh one right before calling the viewer (they're minted per request; an old one may expire). Verified live: the viewer fetched a 7 MB TSMC annual report through such a link, TWCA certificate and all.
+
 ## Language
 
 The 年報 (shareholder-meeting annual report, dtype F04) is Chinese. Large exporters (TSMC, MediaTek, etc.) also publish official English annual reports — check the company's own IR site, or MOPS's English side (`mops.twse.com.tw`, switch to English, or the company's 20-F if it's also a US ADR like TSM). Apply the standard "Non-English filings" rules from SKILL.md.

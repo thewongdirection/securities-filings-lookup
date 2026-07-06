@@ -22,6 +22,11 @@ Mechanics, verified live (2026-07, AstraZeneca):
 
 **What didn't work, so don't re-try it:** structured `criteriaObj.criteria` filters with guessed field names (`company`, `issuer_name`, `classifications`) silently return zero hits. Use `keyword` + client-side filtering. Also note headlines are typed by filers and contain real typos ("2025 **Annul** Report" — AstraZeneca's actual filing headline), so prefer loose `--grep` terms like `20-F` or `annual` and be ready to eyeball the list.
 
+Two practical findings from live testing:
+
+- **Generic company names collide** — keyword "Next" returned NextEnergy Solar Fund, not Next plc. Use the fuller legal name ("Next plc") and check the `company` field on each hit.
+- **Many issuers file BOTH a PDF and the ESEF zip** — Next plc files "Annual Financial Report" (PDF, viewer-friendly, `--grep "Annual Financial Report"` finds it) alongside "Annual Financial Report (ESEF)" (zip). Prefer the PDF for display, the zip when the user wants the official ESEF filing. Artefact PDFs display fine in the interactive viewer straight from `data.fca.org.uk/artefacts/...`. Some filers also upload bare `.xhtml` artefacts.
+
 ## ESEF: modern UK annual reports are ZIPs, not PDFs
 
 Since the UK ESEF mandate, the officially filed annual report is an **ESEF package** — a `.zip` containing the xHTML/iXBRL report (`reports/*.html`) plus taxonomy files. The zip is the authoritative filing; save it as-is. It won't open in a PDF viewer — to let the user read it, extract `reports/*.html` and open that, or fetch the glossy PDF from the company's own IR site (secondary source; say so). Older filings, circulars, prospectuses, and AGM documents are ordinary PDFs.

@@ -22,6 +22,8 @@ Mechanics, verified live (2026-07, TSMC):
 
 **TLS gotcha:** TWSE's chain is issued by TWCA, missing from some default trust stores (`CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain` seen live on Windows). `pip install certifi` fixes it; the script uses certifi automatically when present.
 
+**Some Taiwan filing PDFs are AES-encrypted with an empty password** (Delta Electronics' 年報, seen live) — they open normally in any viewer, but programmatic reading with pypdf requires `pip install cryptography`. The raw-byte save is unaffected either way.
+
 ## Showing a Taiwan filing in the PDF viewer
 
 The step-9 temporary links (`https://doc.twse.com.tw/pdf/<filename>_<timestamp>.pdf`) work in the interactive PDF viewer — generate a fresh one right before calling the viewer (they're minted per request; an old one may expire). Verified live: the viewer fetched a 7 MB TSMC annual report through such a link, TWCA certificate and all.

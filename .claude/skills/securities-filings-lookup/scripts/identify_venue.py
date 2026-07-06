@@ -59,9 +59,11 @@ def identify(raw: str) -> dict:
                      "coverage is less consistent here, verify manually.",
             )
 
-    if re.fullmatch(r"[A-Z]{1,5}", t):
+    # Plain US tickers, including class-share forms like BRK-B / BRK.B
+    # (EDGAR's company_tickers.json uses the dash form).
+    if re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", t):
         return _result(
-            raw, "united_states", t,
+            raw, "united_states", t.replace(".", "-"),
             note="Confirm with a search if this could be a foreign private "
                  "issuer or dual-listed company (e.g. a Chinese ADR that "
                  "also trades in Hong Kong).",

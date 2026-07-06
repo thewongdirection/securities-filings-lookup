@@ -61,14 +61,17 @@ def resolve_cik(ticker: str) -> tuple[int, str]:
     # runs. Cache it for a day.
     import tempfile
     cache = os.path.join(tempfile.gettempdir(), "sec_company_tickers.json")
-    data = None
-    try:
-        if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 86400:
-            with open(cache, encoding="utf-8") as f:
-                data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        data = None
-    if data is None:
+
+    def _load_cache() -> dict | None:
+        try:
+            if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 86400:
+                with open(cache, encoding="utf-8") as f:
+                    return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            pass
+        return None
+
+    def _refresh() -> dict:
         raw = _get(TICKERS_URL)
         data = json.loads(raw.decode())
         try:
@@ -76,10 +79,26 @@ def resolve_cik(ticker: str) -> tuple[int, str]:
                 f.write(raw)
         except OSError:
             pass
+        return data
+
+    def _lookup(data: dict, ticker: str):
+        for entry in data.values():
+            if entry["ticker"].upper() == ticker:
+                return entry["cik_str"], entry["title"]
+        return None
+
     ticker = ticker.upper()
-    for entry in data.values():
-        if entry["ticker"].upper() == ticker:
-            return entry["cik_str"], entry["title"]
+    data = _load_cache()
+    from_cache = data is not None
+    if data is None:
+        data = _refresh()
+    found = _lookup(data, ticker)
+    if found is None and from_cache:
+        # A stale or partial cache must not turn into a false "no such
+        # ticker" -- re-download the real mapping before giving up.
+        found = _lookup(_refresh(), ticker)
+    if found:
+        return found
     raise SystemExit(
         f"No CIK found for ticker '{ticker}' in SEC's company_tickers.json. "
         "It may be very recently listed, a fund, or a SPAC -- try EDGAR full "

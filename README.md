@@ -34,6 +34,13 @@ Then in any Claude Code session:
 
 On claude.ai instead: download this repo as a zip (Code → Download ZIP) and upload it under Settings → Capabilities → Skills. Note that claude.ai's sandbox has no network access to the filing sources, so you get venue identification and direct links there rather than PDF downloads — the skill explains this itself.
 
+## Run it from your phone
+
+Two options:
+
+1. **Claude Code on the web (full functionality).** This repo also carries the skill as a project skill under `.claude/skills/`, so from the Claude mobile app (or claude.ai/code) start a cloud session on this repo and just ask, e.g. *"look up filings for 0700.HK"*. Cloud sessions have real network access, so fetching and PDF saving work. If the session needs the US PDF-render path, it will run the one-time Playwright install itself.
+2. **claude.ai Skills upload (links only).** Download this repo as a zip and upload it under Settings → Capabilities → Skills; the skill then triggers in regular Claude chats, including mobile. Note claude.ai's sandbox has no network access to sec.gov / CNINFO / HKEXnews, so in chats you get venue identification and direct filing links, not PDF downloads — the skill explains this itself when it happens.
+
 ## Requirements
 
 - Python 3.10+ on PATH (standard library only for lookups and HK/China PDF saves)

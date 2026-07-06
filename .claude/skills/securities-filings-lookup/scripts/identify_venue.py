@@ -25,6 +25,10 @@ SUFFIX_MAP = {
     ".SZ": "shenzhen",
     ".SSE": "shanghai",
     ".SZSE": "shenzhen",
+    ".TW": "taiwan",
+    ".TWO": "taiwan",  # TPEx (Taiwan OTC board)
+    ".L": "london",
+    ".LON": "london",
 }
 
 
@@ -39,9 +43,15 @@ def identify(raw: str) -> dict:
             return _result(raw, venue, code)
 
     # Bare numeric: HK codes are short (commonly 1-5 digits, zero-padded
-    # to 5 in URLs); mainland A-share codes are exactly 6 digits.
+    # to 5 in URLs); mainland A-share codes are exactly 6 digits. Taiwan
+    # codes are 4 digits, so bare 4-digit input is genuinely ambiguous.
     if re.fullmatch(r"\d{1,5}", t):
-        return _result(raw, "hong_kong", t.zfill(5))
+        note = None
+        if len(t) == 4:
+            note = ("Assumed Hong Kong; 4-digit codes are also the Taiwan "
+                    "format (e.g. 2330 = TSMC on TWSE). If the company is "
+                    "Taiwanese, use the .TW suffix or confirm with a search.")
+        return _result(raw, "hong_kong", t.zfill(5), note=note)
 
     if re.fullmatch(r"\d{6}", t):
         if t.startswith("688"):

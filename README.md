@@ -9,8 +9,10 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇺🇸 United States | SEC EDGAR | 10-K, 10-Q, 8-K, 20-F, 6-K, ARS, proxies |
 | 🇭🇰 Hong Kong | HKEXnews | Annual/interim reports, announcements |
 | 🇨🇳 Mainland China A-shares | CNINFO (SSE + SZSE) | 年度报告, 半年度报告, 季度报告, prospectuses |
+| 🇹🇼 Taiwan | MOPS / doc.twse.com.tw | 年報 (annual reports), financial reports |
+| 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
 
-Listings outside these three venues (e.g. Taiwan, London primaries) are out of scope; for cross-listed companies the skill retrieves the covered venue's filings (e.g. TSM's SEC 20-F) and says what it can't reach.
+Listings outside these venues (e.g. Tokyo, Frankfurt primaries) are out of scope; for cross-listed companies the skill retrieves the covered venues' filings and says what it can't reach. Note modern UK annual reports are officially filed as ESEF zip packages (xHTML/iXBRL), not PDFs.
 
 ## Install
 
@@ -37,6 +39,7 @@ On claude.ai instead: download this repo as a zip (Code → Download ZIP) and up
   ```
   SEC's primary documents are HTML; the skill prints them to PDF with a real headless browser. HK and China filings are native PDFs and need nothing extra.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
+- **For Taiwan filings**: `pip install certifi` — TWSE's TLS certificates (TWCA) are missing from some default trust stores; the scripts pick up certifi automatically.
 
 ## How to use
 
@@ -48,6 +51,8 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup 0700.HK       # Hong Kong (also: 700, 9988.HK)
 /securities-filings-lookup 600519:SS     # Shanghai (also: 600519, 600519.SS)
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
+/securities-filings-lookup 2330.TW       # Taiwan (bare 2330 is assumed HK — use the suffix)
+/securities-filings-lookup AZN.L         # London
 ```
 
 Or just ask in plain language — "pull up Tencent's annual report", "where are Moutai's filings?", "get me BitMine's latest 10-Q". You can also ask for specific form types, past years, a specific save folder, or a translated/summarized section of any retrieved filing.

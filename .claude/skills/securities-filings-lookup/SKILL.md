@@ -1,6 +1,6 @@
 ---
 name: securities-filings-lookup
-description: Given a stock ticker, determine which exchange or regulator it's listed under (US markets via SEC EDGAR, Hong Kong via HKEX, or mainland China A-shares via CNINFO/SSE/SZSE) and retrieve its official financial and securities filings (10-K, 10-Q, 8-K, 20-F, 6-K, annual reports, interim reports, prospectuses). Use this whenever the user gives a ticker and asks for filings, annual/quarterly reports, regulatory disclosures, or "where can I find X's filings" — even if they don't name the exchange, don't say the word "filing," or just paste a ticker and ask to pull up or look up the company's reports. Also use for dual-listed companies or ADRs (e.g. a US-listed Chinese ADR that also trades in Hong Kong), where filings may exist in more than one jurisdiction.
+description: Given a stock ticker, determine which exchange or regulator it's listed under (US markets via SEC EDGAR, Hong Kong via HKEX, mainland China A-shares via CNINFO/SSE/SZSE, Taiwan via MOPS/TWSE, or London via the FCA National Storage Mechanism) and retrieve its official financial and securities filings (10-K, 10-Q, 8-K, 20-F, 6-K, annual reports, interim reports, prospectuses, ESEF packages). Use this whenever the user gives a ticker and asks for filings, annual/quarterly reports, regulatory disclosures, or "where can I find X's filings" — even if they don't name the exchange, don't say the word "filing," or just paste a ticker and ask to pull up or look up the company's reports. Also use for dual-listed companies or ADRs (e.g. a US-listed Chinese ADR that also trades in Hong Kong), where filings may exist in more than one jurisdiction.
 ---
 
 # Securities Filings Lookup
@@ -20,6 +20,8 @@ Given a ticker, this skill:
 - **United States (SEC EDGAR)** — 10-K/10-Q/8-K for domestic filers, or 20-F/6-K for foreign private issuers (companies incorporated abroad that list in the US, including most Chinese ADRs).
 - **Hong Kong (HKEX / HKEXnews)** — Annual Report + Interim Report, plus a continuous stream of announcements (results, connected transactions, notifiable transactions). No mandatory quarterly reporting for most main-board issuers since 2019.
 - **Mainland China A-shares (CNINFO, covering SSE + SZSE)** — 年度报告 (annual report), 半年度报告 (interim report), and other disclosures, almost always Chinese-only.
+- **Taiwan (MOPS / doc.twse.com.tw)** — 年報 (shareholder-meeting annual report) and audited financial reports, Chinese; large exporters often publish official English annual reports separately. 4-digit codes, ambiguous with HK when bare.
+- **London (FCA National Storage Mechanism)** — annual reports (modern ones as ESEF zip packages, not PDFs), circulars, prospectuses; RNS is the news wire on top. English natively.
 
 Guessing the wrong venue wastes time searching for filings that were never going to be there. Confirm first, then fetch.
 
@@ -48,6 +50,8 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 | United States | `references/us-edgar.md` | `scripts/fetch_us_filings.py` |
 | Hong Kong | `references/hong-kong.md` | — (search/browse workflow; no clean public API) |
 | Mainland China A-shares | `references/china-a-shares.md` | `scripts/fetch_cn_filings.py` |
+| Taiwan | `references/taiwan.md` | `scripts/fetch_tw_filings.py` |
+| London | `references/london.md` | `scripts/fetch_uk_filings.py` |
 
 **General principle:** prefer the primary regulator's own system over third-party aggregators. It's free, authoritative, and won't be paywalled or stale.
 
@@ -59,7 +63,8 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 
 Once the person has pointed at (or you've identified) the specific filing they want, save the actual document — not a reconstruction of its content. All three venues route through `scripts/pdf_utils.py`, which does exactly one of two things:
 
-- **Already a PDF** (true for essentially all Hong Kong and mainland China filings, and some SEC exhibits): the raw bytes are saved unmodified. Byte-for-byte identical to the source — this was tested by downloading a file and comparing it to the original with `cmp`.
+- **Already a PDF** (true for essentially all Hong Kong, mainland China, and Taiwan filings, and some SEC exhibits): the raw bytes are saved unmodified. Byte-for-byte identical to the source — this was tested by downloading a file and comparing it to the original with `cmp`.
+- **UK ESEF packages are ZIPs, not PDFs** — the officially filed modern UK annual report is a zip containing the xHTML/iXBRL report. Save the zip as-is (it IS the original); to let the user read it, extract `reports/*.html`, or offer the glossy PDF from the company's IR site labelled as the secondary source. See `references/london.md`.
 - **HTML** (the normal case for SEC EDGAR primary documents): a real headless browser (Playwright + Chromium) renders the actual page and prints it to PDF — the same output as opening the page in Chrome and choosing Print > Save as PDF. Nothing about the content is parsed, reorganized, or rebuilt; the browser renders the real HTML/CSS as authored, so tables, fonts, and layout match the original.
 
 **Do not try to reconstruct a filing's content from extracted text.** An earlier version of this skill parsed filing HTML (or web_fetch's markdown-extracted text) and rebuilt a new PDF from scratch. That produces something readable, but it is a different document — different layout, different table structure, everything rebuilt except the underlying numbers. If a real browser render isn't available, say so and hand back the original URL. Don't substitute a reconstruction and present it as the filing.

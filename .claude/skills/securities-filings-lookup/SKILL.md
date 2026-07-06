@@ -35,6 +35,25 @@ python scripts/identify_venue.py <ticker>
 
 It parses common suffixes (`.HK`, `.SS`/`.SH`, `.SZ`) and bare numeric codes (HK codes are short, 1–5 digits; mainland A-share codes are 6 digits, with the prefix indicating Shanghai vs. Shenzhen vs. Beijing). Alphabetic tickers default to "US-listed."
 
+### Company names: resolve to a ticker first
+
+If the input is a company name rather than a ticker (spaces, long words, no ticker pattern — the classifier returns `unknown` for these), resolve it before anything else:
+
+```
+python scripts/resolve_name.py "Tencent"
+python scripts/resolve_name.py "TSMC" --venues us,tw
+```
+
+It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM) and prints candidates as `venue code name`. Then:
+
+- **Confirm with the user before proceeding** (AskUserQuestion where available): list the plausible candidates with the closest match first and marked as the default. **If no answer arrives within ~15 seconds** or the session is non-interactive, **proceed with the closest match** — say so in the question and in your reply.
+- Filter obvious noise before asking: HK results include listed *notes/bonds* (names like "TENCENT N2801") — the plain equity is the short bare name; UK results may lack a symbol.
+- **Same name ≠ same company**: "Tencent" also surfaces Tencent Music (TME), a different issuer. Pick the closest match by name, not the first row.
+- **Acronyms can miss**: the matchers search official names, so "TSMC" finds 2330.TW but not the TSM ADR (EDGAR's legal name is "Taiwan Semiconductor Manufacturing"). If a well-known company gets few/odd hits, supplement with a quick web search before asking.
+- If nothing resolves anywhere, web-search "<name> stock ticker", then confirm.
+
+Once a ticker is confirmed (or defaulted), continue with the normal flow below — including the dual-listing question if the name resolved in several venues.
+
 **Don't stop at the heuristic when it matters.** Confirm with a quick web search whenever:
 - The ticker doesn't cleanly match any pattern.
 - The stakes are non-trivial (the user is about to make a decision based on the result).

@@ -81,8 +81,9 @@ def identify(raw: str) -> dict:
 
     return _result(
         raw, "unknown", t,
-        note=f"Could not classify from format alone -- search "
-             f"\"{raw} stock exchange listing\" to confirm.",
+        note=f"Could not classify from format alone -- if this is a company "
+             f"name, run scripts/resolve_name.py \"{raw}\" to find candidate "
+             f"tickers; otherwise search \"{raw} stock exchange listing\".",
     )
 
 

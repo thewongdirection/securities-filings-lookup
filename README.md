@@ -57,6 +57,8 @@ Invoke with a ticker, in any common format:
 
 Or just ask in plain language — "pull up Tencent's annual report", "where are Moutai's filings?", "get me BitMine's latest 10-Q". You can also ask for specific form types, past years, a specific save folder, or a translated/summarized section of any retrieved filing.
 
+**Company names work too** — the skill resolves them to tickers via each venue's own directory (`scripts/resolve_name.py`), asks you to confirm the match, and proceeds with the closest match if you don't answer within ~15 seconds. Beware lookalikes (Tencent vs Tencent Music): the confirmation step exists for a reason.
+
 What you get back: the company resolved to its official identifier (CIK / stock code), a list of recent filings with direct regulator links, the requested documents saved as PDFs, and — where the document is a native PDF — the report opened in the interactive PDF viewer.
 
 ## Default behaviors

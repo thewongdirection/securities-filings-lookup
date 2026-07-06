@@ -84,6 +84,16 @@ This is a real limitation of the current environment, not a solvable formatting 
 
 Name saved files something identifiable — `{ticker}_{form}_{date}.pdf` or similar — so a folder of them stays sortable.
 
+### Where to save — persistent save location
+
+The save folder is remembered across sessions in a one-line config file next to this SKILL.md: **`save_location.txt`** (a single absolute path, UTF-8, no quotes). Resolve the destination in this order whenever a filing is about to be saved:
+
+1. **The user named a folder in this request** ("save it to X", "put these in my Downloads") — use it, and overwrite `save_location.txt` with it: every explicitly specified folder becomes the new remembered default.
+2. **Otherwise, `save_location.txt` exists** — use the folder it contains, without asking.
+3. **Otherwise, ask the user** where downloaded filings should be saved (AskUserQuestion where available; suggest a `filings` folder under their project directory as the default option). Create the folder if needed, write the answer to `save_location.txt`, then save.
+
+Pass the resolved folder to the scripts as usual (`--save-dir` / `--out`). If the configured folder no longer exists, recreate it rather than silently saving elsewhere. The user can change the default at any time simply by naming a different folder in any save request.
+
 One distinction worth keeping straight: saving the person a copy of the actual filing is fine without reservation — these are public regulatory records, and handing someone their own copy is exactly what they're asking for. The usual quote/paraphrase limits apply only if you go on to *summarize or discuss* the filing's contents in the conversation itself.
 
 ## Dual-listed tickers: ask which version is required

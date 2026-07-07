@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import ssl
 import urllib.request
 
 from pdf_utils import is_pdf_bytes, render_url_to_pdf, save_pdf_bytes
@@ -38,10 +39,21 @@ from pdf_utils import is_pdf_bytes, render_url_to_pdf, save_pdf_bytes
 DEFAULT_UA = "securities-filings-lookup-skill contact@example.com"
 
 
+def _context() -> ssl.SSLContext:
+    # Some issuers' hosts (TWSE's TWCA chain, various IR-site CDNs) fail
+    # verification against sparse default trust stores; certifi's Mozilla
+    # bundle fixes this. Fall back to the default when not installed.
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def peek(url: str, user_agent: str = DEFAULT_UA) -> bytes:
     """Fetch the URL's bytes -- just enough to tell if it's already a PDF."""
     req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=_context()) as resp:
         return resp.read()
 
 

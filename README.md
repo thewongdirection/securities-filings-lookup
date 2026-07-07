@@ -41,7 +41,8 @@ On claude.ai instead: download this repo as a zip (Code → Download ZIP) and up
   ```
   SEC's primary documents are HTML; the skill prints them to PDF with a real headless browser. HK and China filings are native PDFs and need nothing extra.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
-- **For Taiwan filings**: `pip install certifi` — TWSE's TLS certificates (TWCA) are missing from some default trust stores; the scripts pick up certifi automatically.
+- **For Taiwan filings** (and some IR-site downloads): `pip install certifi` — several issuers' TLS chains are missing from default trust stores; the scripts pick up certifi automatically.
+- **For Japan name lookup**: `pip install xlrd` (JPX's company directory is an old-format .xls). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
 
 ## How to use
 

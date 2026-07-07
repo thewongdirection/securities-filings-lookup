@@ -22,6 +22,17 @@ Usage:
 
 TDnet only keeps roughly the last month online; older documents need
 EDINET or the company's IR site.
+
+EDINET mode (statutory filings, e.g. the annual securities report
+有価証券報告書) requires a free API key from https://api.edinet-fsa.go.jp
+set as the EDINET_API_KEY environment variable:
+
+    python fetch_jp_filings.py 7203 --edinet-date 2026-06-24
+    python fetch_jp_filings.py 7203 --edinet-date 2026-06-24 --save-dir ./filings
+
+It lists that date's EDINET filings for the company (annual securities
+reports cluster ~3 months after fiscal year end, so late June for the
+typical March year-end) and downloads the PDF rendition by docID.
 """
 from __future__ import annotations
 
@@ -84,6 +95,46 @@ def day_rows(date: datetime.date) -> list[tuple[str, str, str, str, str]]:
     return rows
 
 
+def edinet(code: str, date: str, save_dir: str | None) -> None:
+    """List (and optionally save) a date's EDINET filings for the company.
+    Requires EDINET_API_KEY; keyless calls return 401 (verified live)."""
+    import json
+    key = os.environ.get("EDINET_API_KEY")
+    if not key:
+        print("EDINET requires a free API key: register at "
+              "https://api.edinet-fsa.go.jp, then set EDINET_API_KEY. "
+              "Without it, use the EDINET web UI: "
+              "https://disclosure2.edinet-fsa.go.jp")
+        return
+    url = (f"https://api.edinet-fsa.go.jp/api/v2/documents.json"
+           f"?date={date}&type=2&Subscription-Key={key}")
+    data = _get(url)
+    docs = json.loads(data.decode()).get("results") or []
+    sec5 = code + "0"  # EDINET secCode is the 5-digit form
+    hits = [d for d in docs if (d.get("secCode") or "").startswith(code)
+            or (d.get("secCode") or "") == sec5]
+    if not hits:
+        print(f"No EDINET filings for {code} on {date}. Annual securities "
+              f"reports cluster ~3 months after fiscal year end; try nearby "
+              f"business days or the EDINET web UI.")
+        return
+    for d in hits:
+        line = f"{date}  {d.get('docID')}  {d.get('filerName')}  {d.get('docDescription')}"
+        if not save_dir:
+            print(line)
+            continue
+        os.makedirs(save_dir, exist_ok=True)
+        pdf = _get(f"https://api.edinet-fsa.go.jp/api/v2/documents/"
+                   f"{d['docID']}?type=2&Subscription-Key={key}")
+        out = os.path.join(save_dir, f"{code}_{date}_{d['docID']}.pdf")
+        if pdf and pdf[:5] == b"%PDF-":
+            save_pdf_bytes(pdf, out)
+            print(f"{line}  -> {out}")
+        else:
+            print(f"{line}  -> unexpected content (not PDF); check the doc "
+                  f"type on the EDINET web UI")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("code", help="4-digit Tokyo stock code, e.g. 7203")
@@ -91,7 +142,14 @@ def main() -> None:
     parser.add_argument("--grep", help="Substring filter on the title")
     parser.add_argument("--limit", type=int, default=15)
     parser.add_argument("--save-dir", help="If set, download matching PDFs here")
+    parser.add_argument("--edinet-date",
+                        help="Query EDINET (needs EDINET_API_KEY) for this "
+                             "date's statutory filings instead of TDnet")
     args = parser.parse_args()
+
+    if args.edinet_date:
+        edinet(args.code, args.edinet_date, args.save_dir)
+        return
 
     hits = []
     today = datetime.date.today()

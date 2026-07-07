@@ -46,7 +46,7 @@ python scripts/resolve_name.py "Tencent"
 python scripts/resolve_name.py "TSMC" --venues us,tw
 ```
 
-It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM) and prints candidates as `venue code name`. Then:
+It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM, JPX's English company list for Japan) and prints candidates as `venue code name`. Germany has no public directory — resolve German names by web search. Then:
 
 - **Confirm with the user before proceeding** (AskUserQuestion where available): list the plausible candidates with the closest match first and marked as the default. **If no answer arrives within ~15 seconds** or the session is non-interactive, **proceed with the closest match** — say so in the question and in your reply.
 - Filter obvious noise before asking: HK results include listed *notes/bonds* (names like "TENCENT N2801") — the plain equity is the short bare name; UK results may lack a symbol.

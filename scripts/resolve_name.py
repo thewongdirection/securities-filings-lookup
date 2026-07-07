@@ -140,6 +140,33 @@ def search_tw(q: str) -> list[tuple[str, str, str]]:
     return out[:8]
 
 
+def search_jp(q: str) -> list[tuple[str, str, str]]:
+    """JPX's English listed-company directory (an old-format .xls;
+    requires xlrd: pip install xlrd)."""
+    try:
+        import xlrd
+    except ImportError:
+        return [("jp", "SKIPPED", "pip install xlrd to enable Japan name lookup")]
+    cache = os.path.join(tempfile.gettempdir(), "jpx_companies_e.xls")
+    try:
+        if not (os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 86400):
+            data = _get("https://www.jpx.co.jp/english/markets/statistics-equities/"
+                        "misc/tvdivq0000001vg2-att/data_e.xls", timeout=60)
+            with open(cache, "wb") as f:
+                f.write(data)
+        sh = xlrd.open_workbook(cache).sheet_by_index(0)
+    except Exception as e:
+        return [("jp", "ERROR", str(e))]
+    ql = q.lower()
+    out = []
+    for r in range(1, sh.nrows):
+        name = str(sh.cell_value(r, 2))
+        if ql in name.lower():
+            code = str(sh.cell_value(r, 1)).split(".")[0]
+            out.append(("jp", code + ".T", name))
+    return out[:8]
+
+
 def search_uk(q: str) -> list[tuple[str, str, str]]:
     body = {"from": 0, "size": 40, "sort": "publication_date", "sortorder": "desc",
             "keyword": q, "criteriaObj": {"criteria": [], "dateCriteria": []}}
@@ -161,14 +188,15 @@ def search_uk(q: str) -> list[tuple[str, str, str]]:
 
 
 VENUES = {"us": search_us, "hk": search_hk, "cn": search_cn,
-          "tw": search_tw, "uk": search_uk}
+          "tw": search_tw, "uk": search_uk, "jp": search_jp}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name", help="Company name (or fragment) to resolve")
-    parser.add_argument("--venues", default="us,hk,cn,tw,uk",
-                        help="Comma-separated subset of us,hk,cn,tw,uk")
+    parser.add_argument("--venues", default="us,hk,cn,tw,uk,jp",
+                        help="Comma-separated subset of us,hk,cn,tw,uk,jp "
+                             "(no directory exists for Germany -- web search)")
     args = parser.parse_args()
 
     any_hit = False

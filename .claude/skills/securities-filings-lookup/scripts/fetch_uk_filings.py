@@ -57,16 +57,25 @@ def _context() -> ssl.SSLContext:
 CTX = _context()
 
 
-def search(keyword: str, size: int = 100) -> list[dict]:
-    body = {"from": 0, "size": size, "sort": "publication_date",
-            "sortorder": "desc", "keyword": keyword,
-            "criteriaObj": {"criteria": [], "dateCriteria": []}}
-    req = urllib.request.Request(
-        SEARCH_URL, data=json.dumps(body).encode(),
-        headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30, context=CTX) as resp:
-        j = json.loads(resp.read().decode())
-    return [h["_source"] for h in j.get("hits", {}).get("hits", [])]
+def search(keyword: str, max_scan: int = 500) -> list[dict]:
+    """Page through results -- heavy filers (banks with structured-note
+    programmes) can bury the equity annual report hundreds of rows deep."""
+    out: list[dict] = []
+    page = 100
+    for start in range(0, max_scan, page):
+        body = {"from": start, "size": page, "sort": "publication_date",
+                "sortorder": "desc", "keyword": keyword,
+                "criteriaObj": {"criteria": [], "dateCriteria": []}}
+        req = urllib.request.Request(
+            SEARCH_URL, data=json.dumps(body).encode(),
+            headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30, context=CTX) as resp:
+            j = json.loads(resp.read().decode())
+        hits = [h["_source"] for h in j.get("hits", {}).get("hits", [])]
+        out.extend(hits)
+        if len(hits) < page:
+            break
+    return out
 
 
 def main() -> None:

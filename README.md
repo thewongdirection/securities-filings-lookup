@@ -11,8 +11,10 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇨🇳 Mainland China A-shares | CNINFO (SSE + SZSE) | 年度报告, 半年度报告, 季度报告, prospectuses |
 | 🇹🇼 Taiwan | MOPS / doc.twse.com.tw | 年報 (annual reports), financial reports |
 | 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
+| 🇯🇵 Japan | TDnet (+ EDINET pointers) | 決算短信 (earnings), timely disclosures |
+| 🇩🇪 Frankfurt / Germany | Unternehmensregister / IR sites | Annual reports (documented workflow, no scraper) |
 
-Listings outside these venues (e.g. Tokyo, Frankfurt primaries) are out of scope; for cross-listed companies the skill retrieves the covered venues' filings and says what it can't reach. Note modern UK annual reports are officially filed as ESEF zip packages (xHTML/iXBRL), not PDFs.
+For cross-listed companies the skill retrieves every covered venue's filings and says what it can't reach. Venue quirks are documented per market: modern UK annual reports are ESEF zip packages (xHTML/iXBRL), Japan's EDINET API needs a free subscription key (TDnet is keyless but keeps only ~1 month), and Germany's official repositories are browse-only so the IR-site annual report or a SEC 20-F (SAP) is the practical route.
 
 ## Install
 
@@ -53,6 +55,8 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
 /securities-filings-lookup 2330.TW       # Taiwan (bare 2330 is assumed HK — use the suffix)
 /securities-filings-lookup AZN.L         # London
+/securities-filings-lookup 7203.T        # Tokyo
+/securities-filings-lookup SAP.DE        # Frankfurt / XETRA
 ```
 
 Or just ask in plain language — "pull up Tencent's annual report", "where are Moutai's filings?", "get me BitMine's latest 10-Q". You can also ask for specific form types, past years, a specific save folder, or a translated/summarized section of any retrieved filing.

@@ -29,6 +29,9 @@ SUFFIX_MAP = {
     ".TWO": "taiwan",  # TPEx (Taiwan OTC board)
     ".L": "london",
     ".LON": "london",
+    ".T": "tokyo",
+    ".DE": "frankfurt",  # XETRA
+    ".F": "frankfurt",
 }
 
 
@@ -49,8 +52,9 @@ def identify(raw: str) -> dict:
         note = None
         if len(t) == 4:
             note = ("Assumed Hong Kong; 4-digit codes are also the Taiwan "
-                    "format (e.g. 2330 = TSMC on TWSE). If the company is "
-                    "Taiwanese, use the .TW suffix or confirm with a search.")
+                    "(2330 = TSMC) and Tokyo (7203 = Toyota) formats. If the "
+                    "company is Taiwanese or Japanese, use the .TW / .T "
+                    "suffix or confirm with a search.")
         return _result(raw, "hong_kong", t.zfill(5), note=note)
 
     if re.fullmatch(r"\d{6}", t):

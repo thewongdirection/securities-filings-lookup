@@ -1,6 +1,6 @@
 ---
 name: securities-filings-lookup
-description: Given a stock ticker, determine which exchange or regulator it's listed under (US markets via SEC EDGAR, Hong Kong via HKEX, mainland China A-shares via CNINFO/SSE/SZSE, Taiwan via MOPS/TWSE, or London via the FCA National Storage Mechanism) and retrieve its official financial and securities filings (10-K, 10-Q, 8-K, 20-F, 6-K, annual reports, interim reports, prospectuses, ESEF packages). Use this whenever the user gives a ticker and asks for filings, annual/quarterly reports, regulatory disclosures, or "where can I find X's filings" — even if they don't name the exchange, don't say the word "filing," or just paste a ticker and ask to pull up or look up the company's reports. Also use for dual-listed companies or ADRs (e.g. a US-listed Chinese ADR that also trades in Hong Kong), where filings may exist in more than one jurisdiction.
+description: Given a stock ticker, determine which exchange or regulator it's listed under (US markets via SEC EDGAR, Hong Kong via HKEX, mainland China A-shares via CNINFO/SSE/SZSE, Taiwan via MOPS/TWSE, London via the FCA National Storage Mechanism, Japan via TDnet/EDINET, or Frankfurt/Germany) and retrieve its official financial and securities filings (10-K, 10-Q, 8-K, 20-F, 6-K, annual reports, interim reports, prospectuses, ESEF packages). Use this whenever the user gives a ticker and asks for filings, annual/quarterly reports, regulatory disclosures, or "where can I find X's filings" — even if they don't name the exchange, don't say the word "filing," or just paste a ticker and ask to pull up or look up the company's reports. Also use for dual-listed companies or ADRs (e.g. a US-listed Chinese ADR that also trades in Hong Kong), where filings may exist in more than one jurisdiction.
 ---
 
 # Securities Filings Lookup
@@ -22,6 +22,8 @@ Given a ticker, this skill:
 - **Mainland China A-shares (CNINFO, covering SSE + SZSE)** — 年度报告 (annual report), 半年度报告 (interim report), and other disclosures, almost always Chinese-only.
 - **Taiwan (MOPS / doc.twse.com.tw)** — 年報 (shareholder-meeting annual report) and audited financial reports, Chinese; large exporters often publish official English annual reports separately. 4-digit codes, ambiguous with HK when bare.
 - **London (FCA National Storage Mechanism)** — annual reports (modern ones as ESEF zip packages, not PDFs), circulars, prospectuses; RNS is the news wire on top. English natively.
+- **Japan (TDnet + EDINET)** — 決算短信 (earnings) and timely disclosures on TDnet (keyless, ~1 month retention); 有価証券報告書 (annual securities reports) on EDINET, whose API needs a free key. Japanese; big ADRs (Toyota, Sony) file English 20-Fs with the SEC. 4-digit codes, three-way ambiguous with HK/Taiwan when bare.
+- **Frankfurt / Germany (Unternehmensregister / Bundesanzeiger)** — browse-only official sources; the pragmatic route is the company's IR-site annual report (usually official English) or the SEC 20-F for NYSE-listed names like SAP. No script.
 
 Guessing the wrong venue wastes time searching for filings that were never going to be there. Confirm first, then fetch.
 
@@ -71,6 +73,8 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 | Mainland China A-shares | `references/china-a-shares.md` | `scripts/fetch_cn_filings.py` |
 | Taiwan | `references/taiwan.md` | `scripts/fetch_tw_filings.py` |
 | London | `references/london.md` | `scripts/fetch_uk_filings.py` |
+| Japan | `references/japan.md` | `scripts/fetch_jp_filings.py` (TDnet) |
+| Frankfurt / Germany | `references/frankfurt.md` | — (browse/IR workflow; official sources aren't scriptable) |
 
 **General principle:** prefer the primary regulator's own system over third-party aggregators. It's free, authoritative, and won't be paywalled or stale.
 

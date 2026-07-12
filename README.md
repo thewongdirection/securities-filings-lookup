@@ -68,6 +68,7 @@ What you get back: the company resolved to its official identifier (CIK / stock 
 
 ## Default behaviors
 
+- **PDFs are delivered automatically** — for every document a request resolves to (annual/quarterly report, requested forms, and each version in dual-listed/non-English cases), the skill saves the PDF to your remembered folder and hands it back, rather than only listing links and waiting to be asked. It scopes to what you actually want, not the whole tail of routine housekeeping filings (Form 4s, disclosure returns), and skips anything already retrieved earlier in the conversation.
 - **Dual-listed companies** (A+H shares, US-listed Chinese ADRs with HK listings, dual primaries): the skill asks which market's filings you want — but **if you don't answer within ~15 seconds** (or the session is non-interactive), **it downloads all versions** and lets you narrow afterwards.
 - **Non-English filings** (mainland A-shares, mostly): you always get **the original plus an English version** — the company's official English translation if one exists, otherwise the dual-listed English filing (H-share report / 20-F), otherwise a clearly-labelled unofficial translation of the official summary (摘要).
 - **A-share annual reports open automatically** in the PDF viewer, preferring the official English edition when published.

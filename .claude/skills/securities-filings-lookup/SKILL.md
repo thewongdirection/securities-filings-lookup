@@ -82,9 +82,11 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 
 **Environment matters here.** The bundled scripts shell out to `data.sec.gov` / `cninfo.com.cn` directly, which only works where the shell actually has internet access to those domains (Claude Code, Claude Desktop). In claude.ai's sandboxed code execution, outbound network access is restricted to package registries and does **not** include these filing sources — in that environment, use the `web_search` and `web_fetch` tools instead and follow the same search-then-fetch steps described in each reference file. Try the script first if you're unsure which environment you're in; a network error tells you immediately to fall back to search+fetch.
 
-## Step 3 — Save the original filing as a PDF
+## Step 3 — Save and deliver the original filing as a PDF
 
-Once the person has pointed at (or you've identified) the specific filing they want, save the actual document — not a reconstruction of its content. All three venues route through `scripts/pdf_utils.py`, which does exactly one of two things:
+**Default to delivering, not just listing.** As soon as you successfully retrieve a filing for the request, automatically save it as a PDF to the remembered save location (see "Where to save" below) and surface the saved file(s) to the user — do not stop at a list of links and wait to be asked. This applies to every document the request resolves to: the annual/quarterly report, any specific forms requested, and — for dual-listed or non-English cases — each version fetched (original + English). Scope it sensibly: save the document(s) the user actually wants, not the entire tail of routine housekeeping filings (Form 4s, Next-Day Disclosure Returns, notification/proxy letters) unless they ask for them. Skip anything already saved earlier in the same conversation (don't re-fetch). If a file-delivery tool is available (e.g. `SendUserFile`), present the saved PDFs through it so the user actually receives them; otherwise state the saved absolute paths clearly. Then still show the filing list with links for context.
+
+Save the actual document — not a reconstruction of its content. All venues route through `scripts/pdf_utils.py`, which does exactly one of two things:
 
 - **Already a PDF** (true for essentially all Hong Kong, mainland China, and Taiwan filings, and some SEC exhibits): the raw bytes are saved unmodified. Byte-for-byte identical to the source — this was tested by downloading a file and comparing it to the original with `cmp`.
 - **UK ESEF packages are ZIPs, not PDFs** — the officially filed modern UK annual report is a zip containing the xHTML/iXBRL report. Save the zip as-is (it IS the original); to let the user read it, extract `reports/*.html`, or offer the glossy PDF from the company's IR site labelled as the secondary source. See `references/london.md`.
@@ -149,7 +151,7 @@ When the ticker resolves to a mainland A-share, don't stop at listing filings �
 - Find it with `python scripts/fetch_cn_filings.py <code> --kind annual` — the top results are typically the full Chinese report (年度报告), an official English translation (英文版) if the company publishes one, and the short summary (摘要).
 - **Prefer the English version (英文版) when it exists**; fall back to the full Chinese report otherwise — and then apply the "Non-English filings" rules above (H-share English report for A+H companies, or a translated summary). Mention the summary (摘要) as the quick-read alternative.
 - **Pass the viewer the `https://static.cninfo.com.cn/...` source URL, not a local path.** The viewer only reads local files under its allowed root directories, and saved filings usually live elsewhere — tested: a local path was rejected, while the HTTPS CNINFO URL (same host as the `http://` links the fetch script prints — just switch the scheme) streamed fine.
-- Still list the other recent filings alongside the viewer, and offer to save PDFs locally as usual. If the viewer tool isn't available in the environment, fall back to giving the direct URL.
+- Save the annual report PDF locally by default (per Step 3) and deliver it, in addition to opening it in the viewer; list the other recent filings alongside for context. If the viewer tool isn't available in the environment, fall back to giving the direct URL.
 
 ## Edge cases worth handling explicitly
 

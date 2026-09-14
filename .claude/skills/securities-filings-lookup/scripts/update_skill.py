@@ -83,6 +83,9 @@ def git(repo: Path, *args: str, timeout: int = DEFAULT_TIMEOUT) -> tuple[int, st
         raise GitUnavailable("git is not installed or not on PATH") from exc
     except subprocess.TimeoutExpired as exc:
         raise GitUnavailable(f"git {args[0]} timed out after {timeout}s") from exc
+    except OSError as exc:
+        # git present but unrunnable: a noexec mount, a permission bit.
+        raise GitUnavailable(f"could not run git ({exc})") from exc
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
 
@@ -92,7 +95,9 @@ def redact(url: str) -> str:
     Clones made with a token in the URL (https://x-access-token:ghp_...@
     github.com/...) would otherwise leak it into the transcript.
     """
-    return re.sub(r"://[^/@\s]*@", "://***@", url)
+    # Greedy within the authority: userinfo runs to the LAST '@' before
+    # the host, and a password may itself contain '@'.
+    return re.sub(r"://[^/\s]*@", "://***@", url)
 
 
 def repo_name_from_url(url: str) -> str:
@@ -173,7 +178,30 @@ def _update(report: Report, skill_dir: Path, *, check_only: bool,
     repo = Path(toplevel)
     report.add("repo", str(repo))
 
-    rc, origin_url, _ = git(repo, "remote", "get-url", "origin", timeout=timeout)
+    skill_md = (skill_dir / "SKILL.md").resolve()
+    if not skill_md.is_file():
+        return skip("not-a-skill-directory",
+                    f"{skill_dir} has no SKILL.md, so it is not this skill's "
+                    "checkout")
+    try:
+        relative = skill_md.relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return skip("unrelated-repo",
+                    f"{skill_md} is not inside {repo}")
+    if git(repo, "ls-files", "--error-unmatch", "--", relative,
+           timeout=timeout)[0] != 0:
+        return skip(
+            "unrelated-repo",
+            f"{repo} does not track {relative} -- the skill sits inside "
+            "somebody else's repository (a dotfiles checkout, say), and "
+            "pulling there would update their code, not this skill",
+        )
+
+    # ls-remote --get-url applies url.<base>.insteadOf; remote get-url does
+    # not, and fetch does -- so this is the URL that actually gets contacted.
+    rc, origin_url, _ = git(repo, "ls-remote", "--get-url", "origin", timeout=timeout)
+    if rc != 0 or not origin_url or origin_url == "origin":
+        rc, origin_url, _ = git(repo, "remote", "get-url", "origin", timeout=timeout)
     if rc != 0 or not origin_url:
         return skip("no-origin-remote", f"{repo} has no 'origin' remote configured")
     report.add("remote", redact(origin_url))

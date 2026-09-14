@@ -18,6 +18,7 @@ Usage in a script:
 """
 from __future__ import annotations
 
+import errno
 import socket
 import ssl
 import sys
@@ -26,6 +27,15 @@ from urllib.parse import urlsplit
 
 FALLBACK = ("Fall back to web search + web fetch for this venue (see the "
             "environment note in SKILL.md), or hand the user the direct URL.")
+
+
+class SetupError(RuntimeError):
+    """Something about the environment needs fixing, and the message says how.
+
+    Distinct from an ordinary RuntimeError: those are bugs or source-format
+    changes, and they keep their traceback so they can be debugged.
+    """
+
 
 HOST_NOTES = {
     "sec.gov": ("SEC enforces a fair-access limit and has been observed "
@@ -53,6 +63,23 @@ def _note_for(host: str) -> str:
     return ""
 
 
+PROXY_BLOCK = ("Blocked by this environment's network proxy ({detail}). The "
+               "host is not allowlisted here -- see the Network access section "
+               "of README.md for the hosts this skill needs. " + FALLBACK)
+
+# Failures that are about this machine, not the network. Answering them
+# with "fall back to web search" sends the model off in the wrong
+# direction and hides the real problem from the user.
+FILESYSTEM_ERRORS = (PermissionError, FileNotFoundError, IsADirectoryError,
+                     NotADirectoryError, FileExistsError)
+FILESYSTEM_ERRNOS = {errno.EACCES, errno.EPERM, errno.ENOSPC, errno.EROFS,
+                     errno.ENOENT, errno.EDQUOT, errno.EMFILE}
+
+
+def _is_tunnel_block(text: str) -> bool:
+    return "Tunnel connection failed" in text
+
+
 def explain(exc: BaseException) -> str:
     """One-or-two-line explanation of a failed request."""
     if isinstance(exc, urllib.error.HTTPError):
@@ -73,6 +100,10 @@ def explain(exc: BaseException) -> str:
 
     if isinstance(exc, urllib.error.URLError):
         reason = exc.reason
+        # urllib re-raises the proxy's refused CONNECT as URLError(OSError),
+        # so this has to be checked here rather than in the OSError branch.
+        if _is_tunnel_block(str(reason)):
+            return PROXY_BLOCK.format(detail=reason)
         if isinstance(reason, ssl.SSLCertVerificationError):
             return ("TLS certificate verification failed. Several issuers' "
                     "hosts need certifi's CA bundle: pip install certifi, "
@@ -85,11 +116,16 @@ def explain(exc: BaseException) -> str:
     if isinstance(exc, (socket.timeout, TimeoutError)):
         return f"The request timed out. The host may be slow or blocked. {FALLBACK}"
 
+    if isinstance(exc, FILESYSTEM_ERRORS) or (
+            isinstance(exc, OSError) and exc.errno in FILESYSTEM_ERRNOS):
+        return (f"Filesystem error, not a network problem: {exc}. Fix the path "
+                "or its permissions -- the save location is wrong or "
+                "unwritable, or the disk is full.")
+
     if isinstance(exc, OSError):
         text = str(exc)
-        if "Tunnel connection failed" in text:
-            return ("Blocked by this environment's network proxy "
-                    f"({text}). The host is not allowlisted here. {FALLBACK}")
+        if _is_tunnel_block(text):
+            return PROXY_BLOCK.format(detail=text)
         return f"Network error: {text}. {FALLBACK}"
 
     return f"{type(exc).__name__}: {exc}"
@@ -104,8 +140,9 @@ def run(main) -> None:
         # one clause covers HTTP status errors, DNS, TLS and proxy refusals.
         print(explain(exc), file=sys.stderr)
         sys.exit(1)
-    except RuntimeError as exc:
-        # Raised by pdf_utils when Chromium is missing -- the message is
-        # already written for the reader, so print it as-is.
+    except SetupError as exc:
+        # The message is written for the reader and says how to fix it.
+        # Any other RuntimeError is a bug or a source-format change and
+        # keeps its traceback, which is what makes it debuggable.
         print(str(exc), file=sys.stderr)
         sys.exit(1)

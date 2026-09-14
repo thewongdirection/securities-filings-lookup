@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import fetch_us_filings as us  # noqa: E402
+import pdf_utils  # noqa: E402
 
 FIXTURE = (ROOT / "tests" / "fixtures" / "edgar_index_ibm_10k.html").read_text(
     encoding="utf-8")
@@ -140,7 +141,8 @@ class SaveRowsTest(unittest.TestCase):
 
     def _run(self, exhibits, get=None):
         with mock.patch.object(us, "_get", get or self._fake_get), \
-                mock.patch.object(us, "render_url_to_pdf", self._fake_render), \
+                mock.patch.object(us, "save_filing_as_pdf",
+                                  side_effect=lambda u, d, o, **k: self._fake_render(u, o)), \
                 mock.patch.object(us.time, "sleep"), \
                 mock.patch("sys.stdout", io.StringIO()) as out:
             saved = us.save_rows([dict(ROW)], "IBM", self.dir, exhibits)
@@ -172,7 +174,34 @@ class SaveRowsTest(unittest.TestCase):
         self.assertIn("could not check", printed)
         self.assertIn("429", printed)
 
+    def test_a_failing_exhibit_does_not_abandon_the_remaining_filings(self):
+        rows = [dict(ROW), dict(ROW, filed="2025-02-25",
+                                accession="000005114325000010",
+                                accession_dashed="0000051143-25-000010",
+                                url="https://www.sec.gov/Archives/x/prior.htm")]
+
+        def get(url):
+            self.fetched.append(url)
+            if url.endswith("-index.htm"):
+                return FIXTURE.encode("utf-8")
+            if url.endswith("_d2.htm"):  # the EX-13
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+            return b"<html>filing</html>"
+
+        with mock.patch.object(us, "_get", get), \
+                mock.patch.object(us, "save_filing_as_pdf",
+                                  side_effect=lambda u, d, o, **k: self._fake_render(u, o)), \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()) as out:
+            saved = us.save_rows(rows, "IBM", self.dir, ["EX-13"])
+
+        names = sorted(Path(p).name for p in saved)
+        self.assertEqual(names, ["IBM_10-K_2025-02-25.pdf", "IBM_10-K_2026-02-24.pdf"])
+        self.assertIn("could not be saved", out.getvalue())
+
     def test_a_native_pdf_filing_is_saved_verbatim(self):
+        # The real save_filing_as_pdf runs here: a PDF must be written
+        # byte-for-byte and never routed through the browser.
         def pdf_bytes(url):
             self.fetched.append(url)
             if url.endswith("-index.htm"):
@@ -180,12 +209,26 @@ class SaveRowsTest(unittest.TestCase):
             return b"%PDF-1.4\noriginal bytes\n"
 
         with mock.patch.object(us, "_get", pdf_bytes), \
-                mock.patch.object(us, "render_url_to_pdf") as render, \
+                mock.patch.object(pdf_utils, "render_url_to_pdf") as render, \
                 mock.patch.object(us.time, "sleep"), \
                 mock.patch("sys.stdout", io.StringIO()):
             saved = us.save_rows([dict(ROW)], "IBM", self.dir, [])
         render.assert_not_called()
         self.assertEqual(Path(saved[0]).read_bytes(), b"%PDF-1.4\noriginal bytes\n")
+
+    def test_an_html_filing_is_downloaded_once_not_twice(self):
+        # save_document used to fetch the document and then let the
+        # renderer fetch the identical URL again -- double traffic to a
+        # host that rate-limits.
+        with mock.patch.object(us, "_get", self._fake_get), \
+                mock.patch.object(pdf_utils, "render_url_to_pdf",
+                                  side_effect=self._fake_render) as render, \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()):
+            us.save_rows([dict(ROW)], "IBM", self.dir, [])
+        self.assertEqual(self.fetched, [ROW["url"]])
+        self.assertEqual(render.call_args.kwargs["prefetched"],
+                         (b"<html><body>filing</body></html>", "text/html"))
 
     def test_the_index_url_is_built_from_the_dashed_accession(self):
         self._run(["EX-13"])
@@ -193,6 +236,77 @@ class SaveRowsTest(unittest.TestCase):
         self.assertEqual(index_calls, [
             "https://www.sec.gov/Archives/edgar/data/51143/"
             "000005114326000010/0000051143-26-000010-index.htm"])
+
+
+class SameDayCollisionTest(unittest.TestCase):
+    """One filer can file two of the same form on one day (8-Ks do)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _row(self, accession_dashed, body):
+        row = dict(ROW, form="8-K", filed="2026-03-01",
+                   accession_dashed=accession_dashed,
+                   accession=accession_dashed.replace("-", ""),
+                   url=f"https://www.sec.gov/Archives/x/{body}.htm")
+        return row
+
+    def test_two_filings_of_one_form_on_one_day_are_both_kept(self):
+        rows = [self._row("0000051143-26-000011", "first"),
+                self._row("0000051143-26-000012", "second")]
+        bodies = {}
+
+        def fake_render(url, out_path, **kwargs):
+            Path(out_path).write_text(url, encoding="utf-8")
+            bodies[out_path] = url
+            return out_path
+
+        with mock.patch.object(us, "_get", return_value=b"<html></html>"), \
+                mock.patch.object(us, "save_filing_as_pdf",
+                                  side_effect=lambda u, d, o, **k: fake_render(u, o)), \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()):
+            saved = us.save_rows(rows, "IBM", self.tmp.name, [])
+
+        self.assertEqual(len(saved), 2)
+        self.assertEqual(len(set(saved)), 2, "the second filing overwrote the first")
+        for path in saved:
+            self.assertTrue(Path(path).exists())
+        self.assertEqual(len({Path(p).read_text(encoding="utf-8") for p in saved}), 2)
+
+    def test_the_disambiguator_is_the_accession(self):
+        used = set()
+        first = us._claim_name(used, "IBM_8-K_2026-03-01.pdf", "000005114326000011")
+        second = us._claim_name(used, "IBM_8-K_2026-03-01.pdf", "000005114326000012")
+        self.assertEqual(first, "IBM_8-K_2026-03-01.pdf")
+        self.assertEqual(second, "IBM_8-K_2026-03-01_000012.pdf")
+        self.assertNotEqual(first, second)
+
+
+class ExhibitScopeTest(unittest.TestCase):
+    """The index lookup is a round trip against a host that rate-limits."""
+
+    def test_quarterly_and_current_reports_skip_the_index_entirely(self):
+        for form in ("10-Q", "8-K", "4", "S-8"):
+            with self.subTest(form=form):
+                with mock.patch.object(us, "_get") as get:
+                    self.assertEqual(us.fetch_exhibits(dict(ROW, form=form), ["EX-13"]), [])
+                get.assert_not_called()
+
+    def test_annual_reports_and_their_amendments_do_check(self):
+        for form in ("10-K", "10-K/A", "20-F", "40-F"):
+            with self.subTest(form=form):
+                with mock.patch.object(us, "_get",
+                                       return_value=FIXTURE.encode("utf-8")), \
+                        mock.patch.object(us.time, "sleep"):
+                    found = us.fetch_exhibits(dict(ROW, form=form), ["EX-13"])
+                self.assertEqual([d["type"] for d in found], ["EX-13"])
+
+    def test_base_form_strips_the_amendment_suffix(self):
+        self.assertEqual(us.base_form("10-K/A"), "10-K")
+        self.assertEqual(us.base_form("10-k"), "10-K")
+        self.assertEqual(us.base_form("8-K"), "8-K")
 
 
 class RowMetadataTest(unittest.TestCase):

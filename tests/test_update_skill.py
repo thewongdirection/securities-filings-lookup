@@ -57,7 +57,10 @@ class UpdateSkillTest(unittest.TestCase):
         self.upstream = base / "upstream"
         git(base, "clone", str(self.origin), str(self.upstream))
         (self.upstream / "SKILL.md").write_text("version 1\n", encoding="utf-8")
-        git(self.upstream, "add", "SKILL.md")
+        nested = self.upstream / ".claude" / "skills" / "securities-filings-lookup"
+        nested.mkdir(parents=True)
+        (nested / "SKILL.md").write_text("version 1\n", encoding="utf-8")
+        git(self.upstream, "add", "-A")
         git(self.upstream, "commit", "-m", "v1")
         git(self.upstream, "push", "origin", "main")
 
@@ -73,6 +76,9 @@ class UpdateSkillTest(unittest.TestCase):
 
     def run_update(self, **kwargs) -> dict:
         return report_dict(update_skill.update(self.skill, **kwargs))
+
+    def run_update_dir(self, directory, **kwargs) -> dict:
+        return report_dict(update_skill.update(directory, **kwargs))
 
     # --- the happy paths -------------------------------------------------
 
@@ -108,9 +114,9 @@ class UpdateSkillTest(unittest.TestCase):
         self.assertEqual(self.run_update()["status"], "updated")
 
     def test_updates_when_the_skill_is_a_subdirectory_of_the_repo(self):
-        # Mirrors .claude/skills/securities-filings-lookup/ inside this repo.
+        # Mirrors .claude/skills/securities-filings-lookup/ inside this repo:
+        # a tracked SKILL.md is what marks it as this skill's own copy.
         nested = self.skill / ".claude" / "skills" / "securities-filings-lookup"
-        nested.mkdir(parents=True)
         self.publish()
         out = report_dict(update_skill.update(nested))
         self.assertEqual(out["status"], "updated")
@@ -194,6 +200,57 @@ class UpdateSkillTest(unittest.TestCase):
 
     # --- safety details --------------------------------------------------
 
+    def test_a_skill_dropped_into_an_unrelated_repo_is_not_pulled(self):
+        # ~/.claude/skills/<skill> inside a dotfiles repo: --show-toplevel
+        # resolves to the dotfiles repo, and fast-forwarding that would
+        # update somebody else's code on every filings request.
+        dotfiles = Path(self.tmp.name) / "dotfiles"
+        dotfiles.mkdir()
+        subprocess.run(["git", "init", "-b", "main", str(dotfiles)],
+                       check=True, capture_output=True, env=GIT_ENV)
+        (dotfiles / "README").write_text("my dotfiles\n", encoding="utf-8")
+        git(dotfiles, "add", "-A")
+        git(dotfiles, "commit", "-m", "dotfiles")
+        git(dotfiles, "remote", "add", "origin",
+            str(Path(self.tmp.name) / "securities-filings-lookup.git"))
+
+        dropped = dotfiles / "skills" / "securities-filings-lookup"
+        dropped.mkdir(parents=True)
+        (dropped / "SKILL.md").write_text("copied in by hand\n", encoding="utf-8")
+
+        out = report_dict(update_skill.update(dropped))
+        self.assertEqual(out["reason"], "unrelated-repo")
+        self.assertIn("does not track", out["detail"])
+
+    def test_a_directory_without_skill_md_is_not_a_skill_checkout(self):
+        empty = self.skill / "subdir"
+        empty.mkdir()
+        self.assertEqual(self.run_update_dir(empty)["reason"], "not-a-skill-directory")
+
+    def test_an_unrunnable_git_is_a_skip_not_a_traceback(self):
+        # git on PATH but not executable (noexec mount, permission bit):
+        # subprocess raises PermissionError, which used to escape.
+        with mock.patch.object(update_skill.subprocess, "run",
+                               side_effect=PermissionError(13, "Permission denied")):
+            out = self.run_update()
+        self.assertEqual(out["status"], "skipped")
+        self.assertEqual(out["reason"], "git-unavailable")
+
+    def test_an_insteadof_rewrite_cannot_smuggle_a_different_host_past_the_guard(self):
+        # `remote get-url` shows the literal URL; fetch applies the
+        # rewrite. The name check has to see what fetch will really use.
+        config = Path(self.tmp.name) / "gitconfig"
+        config.write_text(
+            '[url "https://example.invalid/someone-elses-project.git"]\n'
+            '\tinsteadOf = https://github.com/o/securities-filings-lookup.git\n',
+            encoding="utf-8")
+        git(self.skill, "remote", "set-url", "origin",
+            "https://github.com/o/securities-filings-lookup.git")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            out = self.run_update(timeout=10)
+        self.assertEqual(out["reason"], "foreign-remote")
+        self.assertIn("someone-elses-project", out["detail"])
+
     def test_credentials_in_the_remote_url_are_redacted(self):
         secret = "ghp_" + "fake-value-used-only-by-this-test"
         git(self.skill, "remote", "set-url", "origin",
@@ -204,6 +261,9 @@ class UpdateSkillTest(unittest.TestCase):
 
     def test_redact_handles_common_url_shapes(self):
         self.assertEqual(update_skill.redact("https://user:pw@host/o/r.git"),
+                         "https://***@host/o/r.git")
+        # A password containing '@' left its tail in the printed status.
+        self.assertEqual(update_skill.redact("https://user:p@ssw0rd@host/o/r.git"),
                          "https://***@host/o/r.git")
         self.assertEqual(update_skill.redact("https://host/o/r.git"),
                          "https://host/o/r.git")

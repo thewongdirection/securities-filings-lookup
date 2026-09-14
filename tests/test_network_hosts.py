@@ -22,8 +22,20 @@ README = ROOT / "README.md"
 URL_RE = re.compile(r"https?://[^\s'\"`)>\]}|]+")
 HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
+# Reference docs name some hosts without a scheme -- references/frankfurt.md
+# says `unternehmensregister.de`, not https://unternehmensregister.de -- and
+# a scheme-only scan walked straight past them, which is exactly the
+# undocumented-host case this file exists to catch. Anchoring on real
+# top-level domains keeps filenames like SKILL.md and pdf_utils.py out.
+TLDS = "com|cn|hk|tw|uk|jp|de|info|org|net|gov"
+BARE_HOST_RE = re.compile(
+    rf"\b(?:[a-z0-9][a-z0-9-]*\.)+(?:{TLDS})(?:\.[a-z]{{2}})?\b")
+
 BLOCK_RE = re.compile(r"<!--\s*egress-hosts:start\s*-->(.*?)<!--\s*egress-hosts:end\s*-->",
                       re.S)
+OPTIONAL_BLOCK_RE = re.compile(
+    r"<!--\s*egress-hosts-optional:start\s*-->(.*?)<!--\s*egress-hosts-optional:end\s*-->",
+    re.S)
 
 # Hosts that are not filing sources and so are not part of the allowlist:
 # GitHub reaches sessions through its own proxy, and the rest are
@@ -33,7 +45,12 @@ EXEMPT = {
     "claude.com", "claude.ai", "code.claude.com",
     "example.com", "example.invalid", "www.example.com",
     "host",  # "https://host/owner/repo" in a docstring about URL shapes
+    # references/us-edgar.md records this one as a dead end precisely so it
+    # is never fetched, so it must not be on an allowlist either.
+    "gcs-web.com",
 }
+
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 
 SOURCE_FILES = (
     sorted((ROOT / "scripts").glob("*.py"))
@@ -42,30 +59,57 @@ SOURCE_FILES = (
 )
 
 
-def documented_hosts() -> set[str]:
-    match = BLOCK_RE.search(README.read_text(encoding="utf-8"))
+def _hosts_in_block(pattern: re.Pattern, required: bool) -> set[str]:
+    match = pattern.search(README.read_text(encoding="utf-8"))
     if not match:
-        raise AssertionError(
-            "README.md has no <!-- egress-hosts:start --> ... "
-            "<!-- egress-hosts:end --> block")
+        if required:
+            raise AssertionError(
+                "README.md has no <!-- egress-hosts:start --> ... "
+                "<!-- egress-hosts:end --> block")
+        return set()
     return {line.strip() for line in match.group(1).splitlines()
             if HOSTNAME_RE.match(line.strip())}
 
 
+def documented_hosts() -> set[str]:
+    """The paste-ready allowlist."""
+    return _hosts_in_block(BLOCK_RE, required=True)
+
+
+def optional_hosts() -> set[str]:
+    """Hosts documented as needed only for the Frankfurt/Germany route."""
+    return _hosts_in_block(OPTIONAL_BLOCK_RE, required=False)
+
+
 def hosts_in(path: Path) -> set[str]:
+    text = path.read_text(encoding="utf-8")
     found = set()
-    for match in URL_RE.finditer(path.read_text(encoding="utf-8")):
+    for match in URL_RE.finditer(text):
         # Prose runs URLs into punctuation: "...api.edinet-fsa.go.jp," and
         # "(https://example/x)." both have to resolve to the bare host.
         host = urlsplit(match.group(0).rstrip(".,;:)")).hostname
-        if host and host not in EXEMPT:
+        if host:
             found.add(host)
-    return found
+    # An address like your-email@domain.com is not a host to allowlist.
+    found |= set(BARE_HOST_RE.findall(EMAIL_RE.sub(" ", text)))
+    return {h for h in found if h not in EXEMPT}
+
+
+def covered_by(host: str, documented: set[str]) -> bool:
+    """Is this host accounted for by the documented list?
+
+    Prose names parent domains -- "requires access to cninfo.com.cn" --
+    where the code only ever contacts www. and static. of it. A parent of
+    a documented host is covered; a child never is, so a genuinely new
+    subdomain still has to be documented.
+    """
+    return host in documented or any(d.endswith("." + host) for d in documented)
 
 
 class EgressAllowlistTest(unittest.TestCase):
     def setUp(self):
         self.documented = documented_hosts()
+        self.all_documented = self.documented | optional_hosts()
 
     def test_the_block_is_a_paste_ready_list(self):
         # It goes straight into an allowlist field, one domain per line,
@@ -81,7 +125,9 @@ class EgressAllowlistTest(unittest.TestCase):
     def test_every_host_the_skill_contacts_is_documented(self):
         undocumented = {}
         for path in SOURCE_FILES:
-            for host in hosts_in(path) - self.documented:
+            for host in hosts_in(path):
+                if covered_by(host, self.all_documented):
+                    continue
                 undocumented.setdefault(host, set()).add(path.name)
         self.assertEqual(
             undocumented, {},
@@ -107,6 +153,34 @@ class EgressAllowlistTest(unittest.TestCase):
         for expected in ["Network access", "Allowed domains", "Custom"]:
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
+
+    def test_bare_hostnames_in_the_docs_are_seen(self):
+        # references/frankfurt.md names its hosts without a scheme; a
+        # scheme-only scan reported "all documented" while three hosts
+        # were missing from the README entirely.
+        frankfurt = hosts_in(ROOT / "references" / "frankfurt.md")
+        self.assertIn("unternehmensregister.de", frankfurt)
+        self.assertIn("bundesanzeiger.de", frankfurt)
+
+    def test_a_parent_domain_is_covered_but_a_new_subdomain_is_not(self):
+        documented = {"www.cninfo.com.cn", "static.cninfo.com.cn"}
+        self.assertTrue(covered_by("cninfo.com.cn", documented))
+        self.assertTrue(covered_by("www.cninfo.com.cn", documented))
+        self.assertFalse(covered_by("api.cninfo.com.cn", documented))
+
+    def test_email_addresses_are_not_hosts(self):
+        self.assertEqual(
+            BARE_HOST_RE.findall(EMAIL_RE.sub(" ", "Contact your-email@domain.com")), [])
+
+    def test_filenames_are_not_mistaken_for_hosts(self):
+        for not_a_host in ("SKILL.md", "pdf_utils.py", "us-edgar.md", "10-K.htm"):
+            with self.subTest(text=not_a_host):
+                self.assertEqual(BARE_HOST_RE.findall(not_a_host), [])
+
+    def test_the_optional_block_covers_the_germany_route(self):
+        optional = optional_hosts()
+        self.assertIn("unternehmensregister.de", optional)
+        self.assertIn("bundesanzeiger.de", optional)
 
     def test_skill_md_tells_the_model_what_a_blocked_host_means(self):
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")

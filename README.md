@@ -40,7 +40,7 @@ python scripts/update_skill.py
 
 which fast-forwards the clone to the latest published commit and, when anything changed, re-reads `SKILL.md` and the reference docs from disk before doing the lookup — so a session always uses the current version, not whatever was cloned months ago.
 
-It is deliberately conservative, and skips the update (rather than doing anything surprising) when the checkout has uncommitted edits, has local or diverged commits, is on a detached HEAD, isn't a git clone at all, or can't reach the network. It never merges, never rebases, and never discards local work; the worst case is that it does nothing and the existing copy is used. Nothing about a failed update stops the filings lookup.
+It is deliberately conservative, and skips the update (rather than doing anything surprising) when the checkout has uncommitted edits, has local or diverged commits, is on a detached HEAD, isn't a git clone at all, can't reach the network, or sits inside a repository that isn't this skill's — a copy dropped into a dotfiles or project repo is never pulled. The status block names the reason in every case. It never merges, never rebases, and never discards local work; the worst case is that it does nothing and the existing copy is used. Nothing about a failed update stops the filings lookup.
 
 Two consequences worth knowing:
 
@@ -100,6 +100,18 @@ api.data.fca.org.uk
 | 🇯🇵 Japan | `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp` | TDnet disclosures, EDINET API and web UI, JPX company list |
 | 🇬🇧 London | `data.fca.org.uk`, `api.data.fca.org.uk` | NSM document downloads and the search API |
 
+Add these too if you use the Frankfurt / Germany route, which is a browse-and-IR-site workflow rather than an API:
+
+<!-- egress-hosts-optional:start -->
+```text
+unternehmensregister.de
+bundesanzeiger.de
+eqs-news.com
+```
+<!-- egress-hosts-optional:end -->
+
+That list is necessarily incomplete — German annual reports usually come from the issuer's own IR domain, so add those per company or use **Full**.
+
 ### Configuring it in Claude Code on the web
 
 claude.ai/code → the cloud icon showing the environment name (the row above the message box) → hover the environment → settings gear → **Network access** → **Custom** → paste the list into **Allowed domains**, one per line.
@@ -110,7 +122,7 @@ Three things that catch people out:
 
 - **GitHub needs no entry.** Repository traffic — including this skill's own [self-update](#staying-up-to-date) — goes through a separate GitHub proxy, independent of the allowlist. The skill keeps updating itself even with network access set to **None**.
 - **CNINFO is reached over plain HTTP.** The mainland China endpoints are `http://` URLs, and a proxy that only tunnels HTTPS (`CONNECT`) can still refuse them after the domain is allowed. If China filings fail with the domain allowlisted, that is why.
-- **Frankfurt / Germany can't be pinned down.** That venue is a browse-and-IR-site workflow, so beyond `unternehmensregister.de` and `bundesanzeiger.de` it needs whichever host the issuer publishes on (`eqs-news.com` and company IR domains). Add them per company, or use **Full**.
+- **Frankfurt / Germany can't be pinned down.** Even with the optional block above, that venue needs whichever host the issuer publishes on. Add them per company, or use **Full**.
 
 ## How to use
 

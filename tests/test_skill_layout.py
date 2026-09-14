@@ -27,6 +27,11 @@ import sync_project_skill  # noqa: E402
 SKILL_MD = ROOT / "SKILL.md"
 SCRIPTS = sorted((ROOT / "scripts").glob("*.py"))
 
+# Imported by the CLIs rather than run: no argparse, no network.
+LIBRARY_MODULES = {"pdf_utils.py", "net_errors.py", "naming.py"}
+# CLIs that never touch the network, so they don't route through net_errors.
+OFFLINE_CLIS = {"identify_venue.py", "update_skill.py", "sync_project_skill.py"}
+
 
 class ProjectCopyTest(unittest.TestCase):
     def test_project_skill_copy_matches_the_repo_root(self):
@@ -42,6 +47,33 @@ class ProjectCopyTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(sync_project_skill.main(["--check"]), 1)
         self.assertIn("out of sync", out.getvalue())
+
+
+class SyncScriptTest(unittest.TestCase):
+    def test_ignored_files_are_ignored_by_both_halves(self):
+        # A file the copy step skips but the comparison demands makes
+        # --check fail forever: syncing can never clear it.
+        for ignored in (Path("scripts/.DS_Store"), Path("scripts/__pycache__/x.pyc"),
+                        Path("references/a.pyc")):
+            with self.subTest(path=str(ignored)):
+                self.assertTrue(sync_project_skill._ignored(ignored))
+        self.assertFalse(sync_project_skill._ignored(Path("scripts/naming.py")))
+
+    def test_a_stray_ds_store_does_not_wedge_the_check(self):
+        stray = ROOT / "scripts" / ".DS_Store"
+        self.assertFalse(stray.exists(), "test would clobber a real file")
+        stray.write_bytes(b"junk")
+        try:
+            self.assertEqual(sync_project_skill.differences(), [])
+        finally:
+            stray.unlink()
+
+    def test_running_the_mirrored_copy_is_refused(self):
+        # Both copies are runnable; running the mirror mirrors the mirror.
+        with mock.patch.object(sync_project_skill, "SKILL_ROOT",
+                               ROOT / ".claude" / "skills" / "securities-filings-lookup"):
+            self.assertTrue(sync_project_skill.running_from_the_mirror())
+        self.assertFalse(sync_project_skill.running_from_the_mirror())
 
 
 class SkillDefinitionTest(unittest.TestCase):
@@ -69,6 +101,14 @@ class SkillDefinitionTest(unittest.TestCase):
             with self.subTest(reference=name):
                 self.assertTrue((ROOT / "references" / name).is_file())
 
+    def test_script_paths_are_explained_as_skill_relative(self):
+        # The shell's cwd is the user's project, not the skill, so a bare
+        # "python scripts/..." silently does nothing -- or runs the
+        # project's own scripts/ file.
+        step0 = self.text.split("## Step 0", 1)[1].split("## Step 1", 1)[0]
+        self.assertIn("relative to the skill's own directory", step0)
+        self.assertIn("<skill-dir>/scripts/update_skill.py", step0)
+
     def test_step_zero_tells_the_model_to_self_update_and_re_read(self):
         self.assertIn("scripts/update_skill.py", self.text)
         step0 = self.text.split("## Step 0", 1)[1].split("## Step 1", 1)[0]
@@ -95,6 +135,17 @@ class SkipReasonDocumentationTest(unittest.TestCase):
 
 
 class ScriptHealthTest(unittest.TestCase):
+    def test_the_library_and_cli_lists_cover_every_script(self):
+        # A new script has to be classified deliberately, or the checks
+        # below silently stop applying to it.
+        classified = LIBRARY_MODULES | OFFLINE_CLIS
+        network_clis = {s.name for s in SCRIPTS} - classified
+        self.assertTrue(network_clis)
+        for name in sorted(classified):
+            with self.subTest(script=name):
+                self.assertTrue((ROOT / "scripts" / name).is_file(),
+                                f"{name} is classified but no longer exists")
+
     def test_all_scripts_compile(self):
         for script in SCRIPTS:
             with self.subTest(script=script.name):
@@ -104,8 +155,8 @@ class ScriptHealthTest(unittest.TestCase):
         # --help must work offline: it is how the model checks usage when
         # a venue's host is unreachable.
         for script in SCRIPTS:
-            if script.name in {"pdf_utils.py", "net_errors.py"}:
-                continue  # library modules, no CLI
+            if script.name in LIBRARY_MODULES:
+                continue
             with self.subTest(script=script.name):
                 proc = subprocess.run([sys.executable, str(script), "--help"],
                                       capture_output=True, text=True, timeout=60)
@@ -114,9 +165,7 @@ class ScriptHealthTest(unittest.TestCase):
 
     def test_network_scripts_report_failures_through_net_errors(self):
         for script in SCRIPTS:
-            if script.name in {"identify_venue.py", "pdf_utils.py",
-                               "net_errors.py", "update_skill.py",
-                               "sync_project_skill.py"}:
+            if script.name in LIBRARY_MODULES | OFFLINE_CLIS:
                 continue
             with self.subTest(script=script.name):
                 text = script.read_text(encoding="utf-8")

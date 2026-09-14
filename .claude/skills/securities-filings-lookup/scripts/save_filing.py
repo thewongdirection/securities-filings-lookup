@@ -34,7 +34,7 @@ import os
 import ssl
 import urllib.request
 
-from pdf_utils import is_pdf_bytes, render_url_to_pdf, save_pdf_bytes
+from pdf_utils import is_pdf_bytes, save_filing_as_pdf
 from net_errors import run
 
 DEFAULT_UA = "securities-filings-lookup-skill contact@example.com"
@@ -72,11 +72,13 @@ def main() -> None:
     out_path = args.out or default_out_path(args.url)
     data = peek(args.url)
 
-    if is_pdf_bytes(data):
-        saved = save_pdf_bytes(data, out_path)
+    already_pdf = is_pdf_bytes(data)
+    # The bytes are already in hand from peek(); handing them over means
+    # the host is not asked for the same document a second time.
+    saved = save_filing_as_pdf(args.url, data, out_path, user_agent=DEFAULT_UA)
+    if already_pdf:
         print(f"Already a PDF -- saved as-is: {saved}")
     else:
-        saved = render_url_to_pdf(args.url, out_path, user_agent=DEFAULT_UA)
         print(f"Rendered the original page with a real browser: {saved}")
 
 

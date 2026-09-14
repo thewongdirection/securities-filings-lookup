@@ -106,6 +106,15 @@ class UpdateSkillTest(unittest.TestCase):
         self.assertEqual((self.skill / "SKILL.md").read_text(encoding="utf-8"),
                          "version 1\n")
 
+    def test_check_only_reports_the_refusal_a_real_run_would_give(self):
+        # It used to promise "update-available", and the very next run
+        # refused with local-changes.
+        (self.skill / "SKILL.md").write_text("local edit\n", encoding="utf-8")
+        self.publish()
+        out = self.run_update(check_only=True)
+        self.assertEqual(out["status"], "skipped")
+        self.assertEqual(out["reason"], "local-changes")
+
     def test_untracked_files_do_not_block_the_update(self):
         # save_location.txt and filings/ are gitignored, so a real
         # checkout nearly always has untracked files present.

@@ -36,6 +36,7 @@ import ssl
 import sys
 import urllib.request
 
+from naming import filing_name
 from pdf_utils import save_pdf_bytes
 from net_errors import run
 
@@ -119,9 +120,13 @@ def main() -> None:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=120, context=CTX) as resp:
             data = resp.read()
-        safe = "".join(c for c in s.get("headline", "document") if c not in '/\\:*?"<>|')[:70]
         ext = os.path.splitext(s["download_link"])[1] or ".bin"
-        out = os.path.join(args.save_dir, f"{date}_{safe}{ext}")
+        # NSM results carry no ticker, so the company name is the
+        # identifier here; ESEF packages keep their .zip extension.
+        out = os.path.join(args.save_dir,
+                           filing_name(s.get("company", args.company),
+                                       s.get("headline", "document"), date,
+                                       ext=ext))
         if data[:5] == b"%PDF-":
             saved = save_pdf_bytes(data, out)
         else:

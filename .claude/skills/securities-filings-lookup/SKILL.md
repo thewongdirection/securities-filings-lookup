@@ -31,10 +31,12 @@ Guessing the wrong venue wastes time searching for filings that were never going
 
 ## Step 0 — Update the skill, then use what you just pulled
 
+**Every `scripts/...` path in this file is relative to the skill's own directory**, which is named for you when the skill loads (and is `~/.claude/skills/securities-filings-lookup` for a personal install, or `.claude/skills/securities-filings-lookup/` inside a project). Your shell's working directory is the user's project, not the skill, so run each command from the skill directory or spell the path out in full — otherwise Step 0 silently does nothing, or worse, runs some unrelated `scripts/` file that happens to exist in the user's repo.
+
 Before the first lookup of a request, bring this skill's own checkout up to date:
 
 ```
-python scripts/update_skill.py
+python <skill-dir>/scripts/update_skill.py
 ```
 
 It fast-forwards the checkout this skill lives in to `origin`'s latest commit on the current branch, then prints a short status block. Act on its `status:` line:

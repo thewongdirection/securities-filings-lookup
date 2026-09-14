@@ -32,7 +32,8 @@ import urllib.request
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from pdf_utils import is_pdf_bytes, save_pdf_bytes, render_url_to_pdf
+from naming import filing_name
+from pdf_utils import save_filing_as_pdf
 from net_errors import run
 
 QUERY_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
@@ -170,18 +171,20 @@ def main() -> None:
             if not r["url"]:
                 print(f"(no file URL) {r['title']}")
                 continue
+            user_agent = "Mozilla/5.0 (securities-filings-lookup-skill)"
             req = urllib.request.Request(r["url"], headers={
-                "User-Agent": "Mozilla/5.0 (securities-filings-lookup-skill)",
+                "User-Agent": user_agent,
                 "Referer": "http://www.cninfo.com.cn/",
             })
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = resp.read()
-            safe_title = "".join(c for c in r["title"] if c not in '/\\:*?"<>|')[:80]
-            out_path = os.path.join(args.save_dir, f"{args.code}_{idx:02d}_{safe_title}.pdf")
-            # CNINFO documents are already native PDFs -- this is a
-            # direct save. The real-browser render is a defensive
-            # fallback only, in case that ever changes for some filing.
-            saved = save_pdf_bytes(data, out_path) if is_pdf_bytes(data) else render_url_to_pdf(r["url"], out_path)
+            out_path = os.path.join(
+                args.save_dir,
+                filing_name(args.code, r["title"], f"{idx:02d}"))
+            # CNINFO documents are already native PDFs, so this is a
+            # direct byte save; the real-browser render is a defensive
+            # fallback, and it needs the same UA and the bytes we hold.
+            saved = save_filing_as_pdf(r["url"], data, out_path, user_agent=user_agent)
             print(f"{r['title']}  -> {saved}")
         return
 

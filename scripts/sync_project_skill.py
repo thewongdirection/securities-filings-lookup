@@ -35,7 +35,18 @@ PROJECT_COPY = SKILL_ROOT / ".claude" / "skills" / "securities-filings-lookup"
 MIRRORED_FILES = ["SKILL.md"]
 MIRRORED_DIRS = ["scripts", "references"]
 
-IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+# One rule for both halves: a file the copy step skips must not be a file
+# the comparison demands, or --check reports drift that syncing can never
+# clear (a stray .DS_Store did exactly that).
+IGNORED_NAMES = {"__pycache__", ".DS_Store"}
+IGNORED_SUFFIXES = {".pyc", ".pyo"}
+
+IGNORED = shutil.ignore_patterns(*IGNORED_NAMES, "*.pyc", "*.pyo")
+
+
+def _ignored(path: Path) -> bool:
+    return (any(part in IGNORED_NAMES for part in path.parts)
+            or path.suffix in IGNORED_SUFFIXES)
 
 
 def _relevant(root: Path) -> set[Path]:
@@ -45,8 +56,7 @@ def _relevant(root: Path) -> set[Path]:
             out.add(Path(name))
     for name in MIRRORED_DIRS:
         for path in (root / name).rglob("*"):
-            if path.is_file() and "__pycache__" not in path.parts \
-                    and path.suffix != ".pyc":
+            if path.is_file() and not _ignored(path.relative_to(root)):
                 out.add(path.relative_to(root))
     return out
 
@@ -88,11 +98,26 @@ def sync(changed: list[str] | None = None) -> list[str]:
     return changed
 
 
+def running_from_the_mirror() -> bool:
+    """Is this the generated copy rather than the canonical script?
+
+    Both copies are runnable and look identical, and running the mirrored
+    one mirrors the mirror: .claude/skills/<skill>/.claude/skills/<skill>/...
+    """
+    return ".claude" in SKILL_ROOT.parts and "skills" in SKILL_ROOT.parts
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true",
                         help="Report drift and exit 1 instead of writing")
     args = parser.parse_args(argv)
+
+    if running_from_the_mirror():
+        print(f"Refusing to run: {SKILL_ROOT} is the generated project-skill "
+              "copy, not the canonical skill. Run scripts/sync_project_skill.py "
+              "from the repository root instead.")
+        return 1
 
     problems = differences()
     if args.check:

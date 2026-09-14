@@ -72,8 +72,21 @@ PROXY_BLOCK = ("Blocked by this environment's network proxy ({detail}). The "
 # direction and hides the real problem from the user.
 FILESYSTEM_ERRORS = (PermissionError, FileNotFoundError, IsADirectoryError,
                      NotADirectoryError, FileExistsError)
+# Enumerating errnos misses the long tail (ENAMETOOLONG from a Chinese
+# announcement title, ELOOP, EIO). An OSError raised by the filesystem
+# carries the path it failed on; a socket error never does.
 FILESYSTEM_ERRNOS = {errno.EACCES, errno.EPERM, errno.ENOSPC, errno.EROFS,
-                     errno.ENOENT, errno.EDQUOT, errno.EMFILE}
+                     errno.ENOENT, errno.EDQUOT, errno.EMFILE,
+                     errno.ENAMETOOLONG, errno.ELOOP, errno.EIO, errno.EISDIR}
+
+
+def _is_filesystem_error(exc: BaseException) -> bool:
+    if isinstance(exc, urllib.error.URLError):  # includes HTTPError
+        return False
+    if isinstance(exc, FILESYSTEM_ERRORS):
+        return True
+    return isinstance(exc, OSError) and (
+        getattr(exc, "filename", None) is not None or exc.errno in FILESYSTEM_ERRNOS)
 
 
 def _is_tunnel_block(text: str) -> bool:
@@ -116,8 +129,7 @@ def explain(exc: BaseException) -> str:
     if isinstance(exc, (socket.timeout, TimeoutError)):
         return f"The request timed out. The host may be slow or blocked. {FALLBACK}"
 
-    if isinstance(exc, FILESYSTEM_ERRORS) or (
-            isinstance(exc, OSError) and exc.errno in FILESYSTEM_ERRNOS):
+    if _is_filesystem_error(exc):
         return (f"Filesystem error, not a network problem: {exc}. Fix the path "
                 "or its permissions -- the save location is wrong or "
                 "unwritable, or the disk is full.")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import socket
 import ssl
 import sys
@@ -188,6 +189,37 @@ class JpParsingTest(unittest.TestCase):
 
 
 class PdfUtilsTest(unittest.TestCase):
+    def setUp(self):
+        # SKILL_CHROMIUM_PATH is a knob the docs tell users to set, and it
+        # short-circuits _launch_chromium -- these tests must not depend on
+        # whether the developer's shell has it.
+        patcher = mock.patch.dict("os.environ", {}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop(pdf_utils.CHROMIUM_PATH_ENV, None)
+
+    def test_a_bad_override_explains_itself_instead_of_raising_playwright(self):
+        playwright = mock.Mock()
+        playwright.chromium.launch.side_effect = RuntimeError(
+            "Executable doesn't exist at /nonexistent/chrome")
+        with mock.patch.dict("os.environ",
+                             {pdf_utils.CHROMIUM_PATH_ENV: "/nonexistent/chrome"}):
+            with self.assertRaises(net_errors.SetupError) as caught:
+                pdf_utils._launch_chromium(playwright)
+        self.assertIn("/nonexistent/chrome", str(caught.exception))
+        self.assertIn("playwright install chromium", str(caught.exception))
+
+    def test_the_newest_build_wins_even_under_a_numbered_browsers_root(self):
+        # A root like /opt/pw-9999 used to make every candidate score 9999.
+        with tempfile.TemporaryDirectory(prefix="pw-9999-") as tmp:
+            root = Path(tmp) / "pw-9999"
+            for build in (999, 1194):
+                target = root / f"chromium-{build}" / "chrome-linux"
+                target.mkdir(parents=True)
+                (target / "chrome").write_text("#!/bin/sh\n", encoding="utf-8")
+            with mock.patch.dict("os.environ", {"PLAYWRIGHT_BROWSERS_PATH": str(root)}):
+                self.assertIn("chromium-1194", pdf_utils._bundled_chromium())
+
     def test_pdf_sniffing(self):
         self.assertTrue(pdf_utils.is_pdf_bytes(b"%PDF-1.7\n..."))
         self.assertFalse(pdf_utils.is_pdf_bytes(b"<html><body>10-K</body>"))

@@ -78,8 +78,11 @@ def _bundled_chromium() -> str | None:
                 "chromium-*/chrome-win/chrome.exe")
 
     def build_number(path: str) -> int:
-        # chromium-1194 sorts below chromium-999 as text; compare numbers.
-        match = re.search(r"-(\d+)[/\\]", path)
+        # chromium-1194 sorts below chromium-999 as text, so compare
+        # numbers -- and anchor on the chromium directory itself, or a
+        # browsers root like /opt/pw-9999 scores every candidate the same.
+        match = re.search(r"chromium[_a-z]*-(\d+)", os.path.basename(
+            os.path.dirname(os.path.dirname(path))) or path)
         return int(match.group(1)) if match else -1
 
     for pattern in patterns:
@@ -95,7 +98,14 @@ def _launch_chromium(playwright):
 
     override = os.environ.get(CHROMIUM_PATH_ENV)
     if override:
-        return playwright.chromium.launch(executable_path=override)
+        # A wrong override is the likeliest way this is misconfigured, and
+        # it must not surface as a raw Playwright traceback either.
+        try:
+            return playwright.chromium.launch(executable_path=override)
+        except Exception as exc:
+            raise SetupError(
+                f"{SETUP_HINT} ({CHROMIUM_PATH_ENV}={override} failed: {exc})"
+            ) from None
     try:
         return playwright.chromium.launch()
     except Exception as exc:

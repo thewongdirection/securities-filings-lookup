@@ -45,6 +45,7 @@ import sys
 import urllib.error
 import urllib.request
 
+from naming import filing_name
 from pdf_utils import save_pdf_bytes
 from net_errors import run
 
@@ -187,8 +188,8 @@ def main() -> None:
         if data is None:
             print(f"{line}  -> GONE (removed from TDnet)")
             continue
-        safe = "".join(c for c in title if c not in '/\\:*?"<>|')[:70]
-        out = os.path.join(args.save_dir, f"{args.code}_{date:%Y-%m-%d}_{safe}.pdf")
+        out = os.path.join(args.save_dir,
+                           filing_name(args.code, title, f"{date:%Y-%m-%d}"))
         if data[:5] == b"%PDF-":
             saved = save_pdf_bytes(data, out)
         else:

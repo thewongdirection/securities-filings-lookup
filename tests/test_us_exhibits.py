@@ -199,6 +199,55 @@ class SaveRowsTest(unittest.TestCase):
         self.assertEqual(names, ["IBM_10-K_2025-02-25.pdf", "IBM_10-K_2026-02-24.pdf"])
         self.assertIn("could not be saved", out.getvalue())
 
+    def test_one_unreachable_filing_does_not_abandon_the_rest(self):
+        rows = [dict(ROW, url="https://www.sec.gov/Archives/x/gone.htm"),
+                dict(ROW, filed="2025-02-25", accession="000005114325000010",
+                     accession_dashed="0000051143-25-000010",
+                     url="https://www.sec.gov/Archives/x/fine.htm")]
+
+        def get(url):
+            if url.endswith("gone.htm"):
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return self._fake_get(url)
+
+        with mock.patch.object(us, "_get", get), \
+                mock.patch.object(us, "save_filing_as_pdf",
+                                  side_effect=lambda u, d, o, **k: self._fake_render(u, o)), \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()) as out:
+            saved = us.save_rows(rows, "IBM", self.dir, [])
+
+        self.assertEqual([Path(p).name for p in saved], ["IBM_10-K_2025-02-25.pdf"])
+        self.assertIn("could not be saved", out.getvalue())
+
+    def test_a_rate_limit_stops_the_run_instead_of_deepening_it(self):
+        # 429 is the whole IP being limited: pressing on with nine more
+        # documents only makes it worse, and SKILL.md says to wait.
+        rows = [dict(ROW), dict(ROW, filed="2025-02-25")]
+
+        def get(url):
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
+
+        with mock.patch.object(us, "_get", get), \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                us.save_rows(rows, "IBM", self.dir, [])
+        self.assertEqual(caught.exception.code, 429)
+
+    def test_an_unwritable_save_directory_stops_the_run(self):
+        rows = [dict(ROW)]
+
+        def boom(url, data, out_path, **kwargs):
+            raise PermissionError(13, "Permission denied", out_path)
+
+        with mock.patch.object(us, "_get", self._fake_get), \
+                mock.patch.object(us, "save_filing_as_pdf", side_effect=boom), \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()):
+            with self.assertRaises(PermissionError):
+                us.save_rows(rows, "IBM", self.dir, [])
+
     def test_a_native_pdf_filing_is_saved_verbatim(self):
         # The real save_filing_as_pdf runs here: a PDF must be written
         # byte-for-byte and never routed through the browser.

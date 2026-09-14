@@ -260,7 +260,13 @@ def _update(report: Report, skill_dir: Path, *, check_only: bool,
                   timeout=timeout)[1].splitlines()
     report.add("behind-by", f"{len(changed)} changed file(s)")
 
-    if check_only:
+    # Checked before reporting an available update: --check-only exists to
+    # predict what a real run will do, and a dirty tree is the commonest
+    # reason a real run refuses.
+    dirty = git(repo, "status", "--porcelain", "--untracked-files=no",
+                timeout=timeout)[1]
+
+    if check_only and not dirty:
         report.add("status", "update-available")
         report.add("from", local_sha[:9])
         report.add("to", remote_sha[:9])
@@ -268,8 +274,6 @@ def _update(report: Report, skill_dir: Path, *, check_only: bool,
         report.add("action", "run without --check-only to fast-forward")
         return report
 
-    dirty = git(repo, "status", "--porcelain", "--untracked-files=no",
-                timeout=timeout)[1]
     if dirty:
         return skip(
             "local-changes",

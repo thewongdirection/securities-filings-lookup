@@ -33,6 +33,7 @@ import gzip
 import urllib.error
 import urllib.request
 
+from naming import claim_name, filing_name, safe_filename
 from pdf_utils import save_filing_as_pdf
 from net_errors import run
 
@@ -244,35 +245,20 @@ def out_name(ticker: str, form: str, filed: str, exhibit_type: str | None = None
              suffix: str | None = None) -> str:
     """{TICKER}_{FORM}_{DATE}.pdf, per SKILL.md.
 
-    Without the ticker a folder of filings from several companies is
-    unsortable. suffix disambiguates the remaining collision: one filer
-    can file two of the same form on the same day (8-Ks routinely do),
-    and those are different documents.
+    The form and the EDGAR-supplied exhibit type are sanitized rather
+    than having "/" replaced by hand: the type is free text scraped from
+    a table cell, and a colon or backslash in it is an unopenable
+    filename on Windows.
     """
-    safe_form = form.replace("/", "-")
+    label = form.replace("/", "-")
     if exhibit_type:
-        safe_form = f"{safe_form}-{exhibit_type.replace('/', '-')}"
-    tail = f"_{suffix}" if suffix else ""
-    return f"{ticker.upper()}_{safe_form}_{filed}{tail}.pdf"
+        label = f"{label}-{exhibit_type.replace('/', '-')}"
+    return filing_name(ticker, label, filed, extra=suffix)
 
 
 def _claim_name(used: set[str], name: str, accession: str) -> str:
-    """A name no earlier document in this run has taken.
-
-    Overwriting a file from an earlier run is fine -- it is the same
-    document -- but two documents in one run must never collide.
-    """
-    if name not in used:
-        used.add(name)
-        return name
-    stem, ext = os.path.splitext(name)
-    candidate = f"{stem}_{accession[-6:]}{ext}"
-    n = 2
-    while candidate in used:
-        candidate = f"{stem}_{accession[-6:]}-{n}{ext}"
-        n += 1
-    used.add(candidate)
-    return candidate
+    """Kept as a thin alias so the accession tail stays the disambiguator."""
+    return claim_name(used, name, accession[-6:])
 
 
 def save_document(url: str, out_path: str) -> str:
@@ -280,6 +266,21 @@ def save_document(url: str, out_path: str) -> str:
     real browser render of the page -- handing the renderer the bytes we
     already have so the host is not asked for the same document twice."""
     return save_filing_as_pdf(url, _get(url), out_path, user_agent=USER_AGENT)
+
+
+def _reraise_if_fatal(exc: BaseException) -> None:
+    """Stop the run on failures that will hit every remaining document.
+
+    A 429 is the whole IP being rate limited, so continuing just deepens
+    the block; SKILL.md says to wait rather than retry. A filesystem
+    error means the save directory itself is unusable. Anything else is
+    about one document and the run carries on without it.
+    """
+    if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+        raise exc
+    if isinstance(exc, OSError) and not isinstance(exc, urllib.error.URLError) \
+            and getattr(exc, "filename", None) is not None:
+        raise exc
 
 
 def save_rows(rows: list[dict], ticker: str, save_dir: str,
@@ -291,7 +292,14 @@ def save_rows(rows: list[dict], ticker: str, save_dir: str,
         time.sleep(0.15)
         name = _claim_name(used_names, out_name(ticker, r["form"], r["filed"]),
                            r["accession"])
-        saved = save_document(r["url"], os.path.join(save_dir, name))
+        try:
+            saved = save_document(r["url"], os.path.join(save_dir, name))
+        except (urllib.error.URLError, OSError) as exc:
+            _reraise_if_fatal(exc)
+            # One unreachable document is not worth abandoning the rest of
+            # the run; --limit 10 must not quietly mean "until one fails".
+            print(f"{r['filed']}  {r['form']:<10}  could not be saved ({exc})")
+            continue
         saved_paths.append(saved)
         print(f"{r['filed']}  {r['form']:<10}  -> {saved}")
 
@@ -304,6 +312,7 @@ def save_rows(rows: list[dict], ticker: str, save_dir: str,
             try:
                 saved_ex = save_document(ex["url"], os.path.join(save_dir, ex_name))
             except (urllib.error.URLError, OSError) as exc:
+                _reraise_if_fatal(exc)
                 # The filing itself is already saved, and the filings after
                 # this one still need fetching -- one bad exhibit is not
                 # worth ending the run.

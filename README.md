@@ -64,6 +64,54 @@ Two consequences worth knowing:
 - **For Taiwan filings** (and some IR-site downloads): `pip install certifi` — several issuers' TLS chains are missing from default trust stores; the scripts pick up certifi automatically.
 - **For Japan name lookup**: `pip install xlrd` (JPX's company directory is an old-format .xls). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
 
+## Network access (cloud containers, proxies, locked-down networks)
+
+The skill talks directly to each regulator's own servers, so those hosts have to be reachable. In a sandboxed environment — Claude Code on the web, a self-hosted runner, a corporate proxy — anything not on the egress allowlist fails at the connection, usually as a `403 Forbidden` on `CONNECT` or `Tunnel connection failed`, which is a network policy rather than a fault in the skill. A blocked venue degrades to venue identification and direct links; the rest keep working.
+
+Allow these hosts:
+
+<!-- egress-hosts:start -->
+```text
+sec.gov
+data.sec.gov
+www.sec.gov
+www.cninfo.com.cn
+static.cninfo.com.cn
+www1.hkexnews.hk
+www2.hkexnews.hk
+doc.twse.com.tw
+mops.twse.com.tw
+openapi.twse.com.tw
+www.release.tdnet.info
+api.edinet-fsa.go.jp
+disclosure2.edinet-fsa.go.jp
+www.jpx.co.jp
+data.fca.org.uk
+api.data.fca.org.uk
+```
+<!-- egress-hosts:end -->
+
+| Venue | Hosts | What they serve |
+|---|---|---|
+| 🇺🇸 United States | `sec.gov`, `www.sec.gov`, `data.sec.gov` | ticker→CIK map, submissions API, filing documents and exhibit indexes |
+| 🇨🇳 Mainland China | `www.cninfo.com.cn`, `static.cninfo.com.cn` | announcement search and the PDFs themselves |
+| 🇭🇰 Hong Kong | `www1.hkexnews.hk`, `www2.hkexnews.hk` | HKEXnews search, name lookup, documents |
+| 🇹🇼 Taiwan | `doc.twse.com.tw`, `mops.twse.com.tw`, `openapi.twse.com.tw` | filing server, MOPS, the company directory used for name resolution |
+| 🇯🇵 Japan | `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp` | TDnet disclosures, EDINET API and web UI, JPX company list |
+| 🇬🇧 London | `data.fca.org.uk`, `api.data.fca.org.uk` | NSM document downloads and the search API |
+
+### Configuring it in Claude Code on the web
+
+claude.ai/code → the cloud icon showing the environment name (the row above the message box) → hover the environment → settings gear → **Network access** → **Custom** → paste the list into **Allowed domains**, one per line.
+
+Keep **Also include default list of common package managers** ticked: the optional `playwright`, `certifi`, `pypdf` and `xlrd` installs come from PyPI. Wildcards work too (`*.cninfo.com.cn`, `*.twse.com.tw`, `*.hkexnews.hk`), though `api.data.fca.org.uk` is two levels deep so it is safer spelled out. **Full** network access covers everything without a list.
+
+Three things that catch people out:
+
+- **GitHub needs no entry.** Repository traffic — including this skill's own [self-update](#staying-up-to-date) — goes through a separate GitHub proxy, independent of the allowlist. The skill keeps updating itself even with network access set to **None**.
+- **CNINFO is reached over plain HTTP.** The mainland China endpoints are `http://` URLs, and a proxy that only tunnels HTTPS (`CONNECT`) can still refuse them after the domain is allowed. If China filings fail with the domain allowlisted, that is why.
+- **Frankfurt / Germany can't be pinned down.** That venue is a browse-and-IR-site workflow, so beyond `unternehmensregister.de` and `bundesanzeiger.de` it needs whichever host the issuer publishes on (`eqs-news.com` and company IR domains). Add them per company, or use **Full**.
+
 ## How to use
 
 Invoke with a ticker, in any common format:

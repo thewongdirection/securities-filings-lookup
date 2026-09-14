@@ -113,6 +113,8 @@ Save the actual document — not a reconstruction of its content. All venues rou
 
 **Do not try to reconstruct a filing's content from extracted text.** An earlier version of this skill parsed filing HTML (or web_fetch's markdown-extracted text) and rebuilt a new PDF from scratch. That produces something readable, but it is a different document — different layout, different table structure, everything rebuilt except the underlying numbers. If a real browser render isn't available, say so and hand back the original URL. Don't substitute a reconstruction and present it as the filing.
 
+**Some filers put the annual report in an exhibit.** IBM's 10-K *form* is ~30 pages of cross-references; the MD&A, the consolidated statements and the audit report live in **EX-13**, incorporated by reference, in the same accession. Saving only the primary document there hands the user a wrapper with no financials in it. `fetch_us_filings.py --save-dir` now reads the filing's index and saves any `EX-13` alongside the primary document by default (`--exhibits EX-13,EX-21` to widen, `--no-exhibits` to turn it off). If you ever save a 10-K by URL with `save_filing.py` instead, check the accession index yourself — `https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{accession-dashed}-index.htm` — and pull the EX-13 too. A 10-K that renders to ~30 pages is the tell.
+
 **With real network access (Claude Code, Claude Desktop):**
 
 ```

@@ -48,3 +48,34 @@ Requirements the script already handles, but worth knowing:
 | SC 13D / 13G | Beneficial ownership disclosure |
 
 Foreign private issuers (20-F filers) don't have a mandatory quarterly filing requirement the way domestic 10-Q filers do — 6-Ks are furnished whenever the company has something to disclose (often includes unaudited interim results, but check the specific 6-K, since many just cover press releases or officer changes).
+
+## Incorporation by reference: the annual report can be an exhibit
+
+A 10-K may be a thin form whose substance is incorporated by reference
+from an exhibit in the same accession. IBM is the standard example: for
+FY2025, `ibm-20251231.htm` (the primary document) renders to 31 pages
+and carries Item 8 only as a cross-reference, while `EX-13`
+(`ibm-20251231_d2.htm`, 4.5 MB) holds the MD&A, the consolidated
+statements and the audit report -- 117 rendered pages.
+
+The submissions API only names `primaryDocument`, so the exhibit has to
+come from the accession's filing index:
+
+```
+https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{accession-dashed}-index.htm
+```
+
+Its table is `Seq | Description | Document | Type | Size`. Select on the
+**Type** column (`EX-13`, `EX-13.1`), not Description, which is free
+text. `fetch_us_filings.py --save-dir` does this by default; widen it
+with `--exhibits EX-13,EX-21` or suppress it with `--no-exhibits`.
+
+**Inline-XBRL documents are linked through EDGAR's viewer**, as
+`/ix?doc=/Archives/edgar/data/...`. That URL is a JavaScript
+application: rendering it gives a blank or broken PDF. Always strip the
+viewer prefix and fetch the `/Archives/...` path itself.
+
+Tells that you are looking at a wrapper rather than the real annual
+report: a 10-K that renders to ~30 pages, repeated "incorporated herein
+by reference" in Items 7 and 8, or an accession whose largest document
+is not the primary one.

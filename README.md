@@ -30,6 +30,25 @@ git clone https://github.com/thewongdirection/securities-filings-lookup.git $env
 
 On claude.ai instead: download this repo as a zip (Code → Download ZIP) and upload it under Settings → Capabilities → Skills.
 
+### Staying up to date
+
+The skill updates itself. Every time it runs, its first step is:
+
+```bash
+python scripts/update_skill.py
+```
+
+which fast-forwards the clone to the latest published commit and, when anything changed, re-reads `SKILL.md` and the reference docs from disk before doing the lookup — so a session always uses the current version, not whatever was cloned months ago.
+
+It is deliberately conservative, and skips the update (rather than doing anything surprising) when the checkout has uncommitted edits, has local or diverged commits, is on a detached HEAD, isn't a git clone at all, or can't reach the network. It never merges, never rebases, and never discards local work; the worst case is that it does nothing and the existing copy is used. Nothing about a failed update stops the filings lookup.
+
+Two consequences worth knowing:
+
+- **Zip / marketplace installs don't self-update** (there's no git remote to check). Re-download to upgrade, or install via `git clone` as above.
+- **If you've edited your copy**, the skill stops updating and says so. Commit your changes on a branch, or keep them and accept that you're pinned to that version.
+
+`python scripts/update_skill.py --check-only` reports whether an update exists without taking it.
+
 ## Prerequisites
 
 - **Claude Code (or Claude Desktop)** with real network access — the scripts talk directly to `sec.gov` / `data.sec.gov`, `cninfo.com.cn`, and `hkexnews.hk`. In claude.ai's sandbox those hosts are unreachable, so there the skill degrades gracefully to venue identification and direct links (no PDF downloads).
@@ -40,6 +59,7 @@ On claude.ai instead: download this repo as a zip (Code → Download ZIP) and up
   playwright install chromium
   ```
   SEC's primary documents are HTML; the skill prints them to PDF with a real headless browser. HK and China filings are native PDFs and need nothing extra.
+  Where a Chromium is already installed but Playwright pins a different build (Claude Code on the web), the scripts fall back to the browser under `PLAYWRIGHT_BROWSERS_PATH`; `SKILL_CHROMIUM_PATH` forces a specific binary.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
 - **For Taiwan filings** (and some IR-site downloads): `pip install certifi` — several issuers' TLS chains are missing from default trust stores; the scripts pick up certifi automatically.
 - **For Japan name lookup**: `pip install xlrd` (JPX's company directory is an old-format .xls). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
@@ -68,6 +88,7 @@ What you get back: the company resolved to its official identifier (CIK / stock 
 
 ## Default behaviors
 
+- **The skill self-updates before each request** — it fast-forwards its own clone, then uses the freshly pulled instructions and scripts (see [Staying up to date](#staying-up-to-date)). Uncommitted local edits, a missing network, or a non-git install just skip the update.
 - **PDFs are delivered automatically** — for every document a request resolves to (annual/quarterly report, requested forms, and each version in dual-listed/non-English cases), the skill saves the PDF to your remembered folder and hands it back, rather than only listing links and waiting to be asked. It scopes to what you actually want, not the whole tail of routine housekeeping filings (Form 4s, disclosure returns), and skips anything already retrieved earlier in the conversation.
 - **Dual-listed companies** (A+H shares, US-listed Chinese ADRs with HK listings, dual primaries): the skill asks which market's filings you want — but **if you don't answer within ~15 seconds** (or the session is non-interactive), **it downloads all versions** and lets you narrow afterwards.
 - **Non-English filings** (mainland A-shares, mostly): you always get **the original plus an English version** — the company's official English translation if one exists, otherwise the dual-listed English filing (H-share report / 20-F), otherwise a clearly-labelled unofficial translation of the official summary (摘要).
@@ -93,8 +114,23 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 ## What's inside
 
 - `SKILL.md` — the skill definition, workflow, and default behaviors
+- `scripts/update_skill.py` — the Step 0 self-update: fast-forward-only, never on a dirty tree
 - `scripts/identify_venue.py` — offline ticker→venue classifier (suffixes, bare codes, class shares)
 - `scripts/fetch_us_filings.py` — SEC EDGAR listing + PDF save (handles SEC's gzip responses, bot detection, rate-limit caching)
 - `scripts/fetch_cn_filings.py` — CNINFO listing + PDF save (handles the `code,orgId` query requirement and server-side title search)
 - `scripts/save_filing.py` / `scripts/pdf_utils.py` — save any filing URL as the original PDF
 - `references/` — per-venue mechanics, URL patterns, and documented dead ends so they don't get re-tried
+- `scripts/net_errors.py` — turns rate limits, blocked hosts and TLS failures into one plain line instead of a traceback
+- `scripts/sync_project_skill.py` — mirrors the skill into `.claude/skills/` so the two copies can't drift
+- `tests/` — offline regression tests (no network required)
+
+## Development
+
+```bash
+python -m unittest discover -s tests      # run every regression test
+python scripts/sync_project_skill.py      # after editing SKILL.md / scripts / references
+```
+
+The repo root is the canonical skill; `.claude/skills/securities-filings-lookup/` is a generated mirror that lets Claude Code on the web load it as a project skill. `tests/test_skill_layout.py` fails if the two drift, so run the sync script before committing.
+
+The tests are pure standard library and never touch a regulator's server: network responses are stubbed, and the self-update tests run against throwaway local git repositories. Anything that needs live access to SEC/CNINFO/TWSE belongs in a manual check, not the suite.

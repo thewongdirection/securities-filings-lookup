@@ -13,6 +13,8 @@ Given a ticker, this skill:
 2. Pulls filings from the correct authoritative regulator/exchange source — never a paywalled aggregator when a free, primary source exists.
 3. Saves the actual filing document as a PDF — the original, not a reconstruction of its content. See Step 3 below for exactly what that means and where it doesn't work.
 
+Before any of that, it updates itself (Step 0) so the workflow, the reference docs, and the scripts you run are the current published ones rather than whatever was on disk from last time.
+
 ## Why the venue matters
 
 "Financial filings" means something different depending on where a company is listed:
@@ -26,6 +28,23 @@ Given a ticker, this skill:
 - **Frankfurt / Germany (Unternehmensregister / Bundesanzeiger)** — browse-only official sources; the pragmatic route is the company's IR-site annual report (usually official English) or the SEC 20-F for NYSE-listed names like SAP. No script.
 
 Guessing the wrong venue wastes time searching for filings that were never going to be there. Confirm first, then fetch.
+
+## Step 0 — Update the skill, then use what you just pulled
+
+Before the first lookup of a request, bring this skill's own checkout up to date:
+
+```
+python scripts/update_skill.py
+```
+
+It fast-forwards the checkout this skill lives in to `origin`'s latest commit on the current branch, then prints a short status block. Act on its `status:` line:
+
+- **`updated`** — the files on disk just changed under you. **Re-read `SKILL.md` from disk before going further**, along with whichever `references/*.md` the request needs, and run the scripts as they are on disk. What was loaded into the conversation when the skill triggered is the previous version; the `files:` line says what changed.
+- **`up-to-date`** — carry on.
+- **`update-available`** — only with `--check-only`; run it again without the flag to actually take the update.
+- **`skipped`** — carry on with the local copy, which is the best available version. The `reason:` line says why: `not-a-git-checkout` (zip or marketplace install), `offline`, `foreign-remote` (vendored inside another project), `local-changes`, `local-ahead`, `diverged`, `detached-head`. Mention it to the user only when they could act on it — `local-changes`, `local-ahead`, `diverged` — and never let it block the lookup.
+
+Run it **once per request**, not before each script call, and never in a loop. It is deliberately timid: fast-forward only, never on a dirty working tree, never on a repo that isn't this skill's, and it exits 0 even when it fails, so a self-update problem can never stop the filings work the user actually asked for.
 
 ## Step 1 — Identify the ticker and its listing venue
 
@@ -82,9 +101,11 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 
 **Environment matters here.** The bundled scripts shell out to `data.sec.gov` / `cninfo.com.cn` directly, which only works where the shell actually has internet access to those domains (Claude Code, Claude Desktop). In claude.ai's sandboxed code execution, outbound network access is restricted to package registries and does **not** include these filing sources — in that environment, use the `web_search` and `web_fetch` tools instead and follow the same search-then-fetch steps described in each reference file. Try the script first if you're unsure which environment you're in; a network error tells you immediately to fall back to search+fetch.
 
-## Step 3 — Save the original filing as a PDF
+## Step 3 — Save and deliver the original filing as a PDF
 
-Once the person has pointed at (or you've identified) the specific filing they want, save the actual document — not a reconstruction of its content. All three venues route through `scripts/pdf_utils.py`, which does exactly one of two things:
+**Default to delivering, not just listing.** As soon as you successfully retrieve a filing for the request, automatically save it as a PDF to the remembered save location (see "Where to save" below) and surface the saved file(s) to the user — do not stop at a list of links and wait to be asked. This applies to every document the request resolves to: the annual/quarterly report, any specific forms requested, and — for dual-listed or non-English cases — each version fetched (original + English). Scope it sensibly: save the document(s) the user actually wants, not the entire tail of routine housekeeping filings (Form 4s, Next-Day Disclosure Returns, notification/proxy letters) unless they ask for them. Skip anything already saved earlier in the same conversation (don't re-fetch). If a file-delivery tool is available (e.g. `SendUserFile`), present the saved PDFs through it so the user actually receives them; otherwise state the saved absolute paths clearly. Then still show the filing list with links for context.
+
+Save the actual document — not a reconstruction of its content. All venues route through `scripts/pdf_utils.py`, which does exactly one of two things:
 
 - **Already a PDF** (true for essentially all Hong Kong, mainland China, and Taiwan filings, and some SEC exhibits): the raw bytes are saved unmodified. Byte-for-byte identical to the source — this was tested by downloading a file and comparing it to the original with `cmp`.
 - **UK ESEF packages are ZIPs, not PDFs** — the officially filed modern UK annual report is a zip containing the xHTML/iXBRL report. Save the zip as-is (it IS the original); to let the user read it, extract `reports/*.html`, or offer the glossy PDF from the company's IR site labelled as the secondary source. See `references/london.md`.
@@ -105,6 +126,8 @@ One-time setup for the browser-render path:
 pip install playwright
 playwright install chromium
 ```
+
+If Chromium is already on the machine but Playwright refuses to launch it — a pre-provisioned container ships one build while the installed Playwright pins another, which is what Claude Code on the web does — the scripts fall back to the Chromium under `PLAYWRIGHT_BROWSERS_PATH` by themselves. Set `SKILL_CHROMIUM_PATH=/path/to/chrome` to force a specific binary. If no browser can be found at all, the script says so and gives the filing's URL; it never substitutes a reconstruction.
 
 **In claude.ai's sandbox: none of this works for any venue, and that's worth stating plainly rather than working around.** Verified directly: `web_fetch` always extracts/transforms content — including for PDFs. Setting `web_fetch_pdf_extract_text=false` was expected to return raw bytes for an already-PDF filing (the CNINFO/HKEX case), but tested against two real CNINFO PDFs (one 143 pages, one 4 pages) and both came back as extracted text either way, not base64. An earlier version of this doc claimed the binary-mode path let claude.ai retrieve HK/China filings byte-faithfully — that claim was untested and turned out to be wrong; it's corrected here. Combined with the earlier finding that even headless Chromium hits the same network allowlist wall as `bash` (a live `403 Host not in allowlist: www.sec.gov`), there is no tool available in this environment, for any of the three venues, that returns a filing's original bytes. The honest response is to give the person the direct URL so they can open or download it themselves — not to hand over extracted text or a reconstruction and imply it's the same thing.
 
@@ -149,7 +172,7 @@ When the ticker resolves to a mainland A-share, don't stop at listing filings �
 - Find it with `python scripts/fetch_cn_filings.py <code> --kind annual` — the top results are typically the full Chinese report (年度报告), an official English translation (英文版) if the company publishes one, and the short summary (摘要).
 - **Prefer the English version (英文版) when it exists**; fall back to the full Chinese report otherwise — and then apply the "Non-English filings" rules above (H-share English report for A+H companies, or a translated summary). Mention the summary (摘要) as the quick-read alternative.
 - **Pass the viewer the `https://static.cninfo.com.cn/...` source URL, not a local path.** The viewer only reads local files under its allowed root directories, and saved filings usually live elsewhere — tested: a local path was rejected, while the HTTPS CNINFO URL (same host as the `http://` links the fetch script prints — just switch the scheme) streamed fine.
-- Still list the other recent filings alongside the viewer, and offer to save PDFs locally as usual. If the viewer tool isn't available in the environment, fall back to giving the direct URL.
+- Save the annual report PDF locally by default (per Step 3) and deliver it, in addition to opening it in the viewer; list the other recent filings alongside for context. If the viewer tool isn't available in the environment, fall back to giving the direct URL.
 
 ## Edge cases worth handling explicitly
 

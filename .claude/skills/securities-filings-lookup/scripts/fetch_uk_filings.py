@@ -37,6 +37,7 @@ import sys
 import urllib.request
 
 from pdf_utils import save_pdf_bytes
+from net_errors import run
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -131,4 +132,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

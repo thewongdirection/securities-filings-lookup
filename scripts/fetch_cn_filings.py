@@ -33,6 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from pdf_utils import is_pdf_bytes, save_pdf_bytes, render_url_to_pdf
+from net_errors import run
 
 QUERY_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
 ORGID_URL = "http://www.cninfo.com.cn/new/information/topSearch/detailOfQuery"
@@ -189,4 +190,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

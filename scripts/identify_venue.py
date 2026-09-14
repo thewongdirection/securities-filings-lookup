@@ -98,9 +98,20 @@ def _result(raw: str, venue: str, code: str, note: str | None = None) -> dict:
     return out
 
 
+USAGE = """usage: identify_venue.py <ticker>
+
+Classify a ticker by likely listing venue, offline. Examples:
+    identify_venue.py MSFT        -> united_states
+    identify_venue.py 0700.HK     -> hong_kong
+    identify_venue.py 600519      -> shanghai
+"""
+
 if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
+        print(USAGE)
+        sys.exit(0)
     if len(sys.argv) != 2:
-        print("Usage: python identify_venue.py <ticker>")
+        print(USAGE)
         sys.exit(1)
     for key, value in identify(sys.argv[1]).items():
         print(f"{key}: {value}")

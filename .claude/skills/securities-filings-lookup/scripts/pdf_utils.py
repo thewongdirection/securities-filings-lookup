@@ -29,12 +29,78 @@ to silently substitute a reconstruction.
 Setup (one-time):
     pip install playwright
     playwright install chromium
+
+Where Chromium is already installed but Playwright pins a different
+build (Claude Code on the web), the browser under
+PLAYWRIGHT_BROWSERS_PATH is used automatically; SKILL_CHROMIUM_PATH
+forces a specific binary.
 """
 from __future__ import annotations
 
 
+# Some environments (Claude Code on the web) ship Chromium at a fixed
+# path rather than the build Playwright pins, so a plain launch() fails
+# even though a perfectly good browser is installed. Set this to the
+# binary to use, or let _launch_chromium find it.
+CHROMIUM_PATH_ENV = "SKILL_CHROMIUM_PATH"
+
+SETUP_HINT = (
+    "Chromium is not available to Playwright, so the filing's HTML can't be "
+    "rendered to PDF. Install it with `playwright install chromium`, or point "
+    f"{CHROMIUM_PATH_ENV} at an existing Chromium binary. Until then, hand the "
+    "user the filing's direct URL -- never substitute a reconstruction."
+)
+
+
 def is_pdf_bytes(data: bytes) -> bool:
     return data[:5] == b"%PDF-"
+
+
+def _bundled_chromium() -> str | None:
+    """Find a Chromium binary in Playwright's browser directory.
+
+    Only used after a normal launch fails: a pre-provisioned container
+    can hold build 1194 while the installed Playwright pins 1234, and
+    the working browser is right there.
+    """
+    import glob
+    import os
+    import re
+
+    root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if not root or not os.path.isdir(root):
+        return None
+    patterns = ("chromium-*/chrome-linux/chrome",
+                "chromium_headless_shell-*/chrome-linux/headless_shell",
+                "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+                "chromium-*/chrome-win/chrome.exe")
+
+    def build_number(path: str) -> int:
+        # chromium-1194 sorts below chromium-999 as text; compare numbers.
+        match = re.search(r"-(\d+)[/\\]", path)
+        return int(match.group(1)) if match else -1
+
+    for pattern in patterns:
+        matches = glob.glob(os.path.join(root, pattern))
+        if matches:
+            return max(matches, key=build_number)
+    return None
+
+
+def _launch_chromium(playwright):
+    """Launch Chromium, falling back to a browser already on the box."""
+    import os
+
+    override = os.environ.get(CHROMIUM_PATH_ENV)
+    if override:
+        return playwright.chromium.launch(executable_path=override)
+    try:
+        return playwright.chromium.launch()
+    except Exception as exc:
+        fallback = _bundled_chromium()
+        if not fallback:
+            raise RuntimeError(f"{SETUP_HINT} (launch failed: {exc})") from None
+        return playwright.chromium.launch(executable_path=fallback)
 
 
 def save_pdf_bytes(data: bytes, out_path: str) -> str:
@@ -64,7 +130,10 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
     """
     import urllib.request
 
-    from playwright.sync_api import sync_playwright
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError(SETUP_HINT) from None
 
     if not out_path.lower().endswith(".pdf"):
         out_path += ".pdf"
@@ -75,7 +144,7 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
             return resp.read(), resp.headers.get("Content-Type", "application/octet-stream")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = _launch_chromium(p)
         try:
             page = browser.new_page(user_agent=user_agent) if user_agent else browser.new_page()
             if user_agent:

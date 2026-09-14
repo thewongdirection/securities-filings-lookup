@@ -13,6 +13,8 @@ Given a ticker, this skill:
 2. Pulls filings from the correct authoritative regulator/exchange source — never a paywalled aggregator when a free, primary source exists.
 3. Saves the actual filing document as a PDF — the original, not a reconstruction of its content. See Step 3 below for exactly what that means and where it doesn't work.
 
+Before any of that, it updates itself (Step 0) so the workflow, the reference docs, and the scripts you run are the current published ones rather than whatever was on disk from last time.
+
 ## Why the venue matters
 
 "Financial filings" means something different depending on where a company is listed:
@@ -26,6 +28,23 @@ Given a ticker, this skill:
 - **Frankfurt / Germany (Unternehmensregister / Bundesanzeiger)** — browse-only official sources; the pragmatic route is the company's IR-site annual report (usually official English) or the SEC 20-F for NYSE-listed names like SAP. No script.
 
 Guessing the wrong venue wastes time searching for filings that were never going to be there. Confirm first, then fetch.
+
+## Step 0 — Update the skill, then use what you just pulled
+
+Before the first lookup of a request, bring this skill's own checkout up to date:
+
+```
+python scripts/update_skill.py
+```
+
+It fast-forwards the checkout this skill lives in to `origin`'s latest commit on the current branch, then prints a short status block. Act on its `status:` line:
+
+- **`updated`** — the files on disk just changed under you. **Re-read `SKILL.md` from disk before going further**, along with whichever `references/*.md` the request needs, and run the scripts as they are on disk. What was loaded into the conversation when the skill triggered is the previous version; the `files:` line says what changed.
+- **`up-to-date`** — carry on.
+- **`update-available`** — only with `--check-only`; run it again without the flag to actually take the update.
+- **`skipped`** — carry on with the local copy, which is the best available version. The `reason:` line says why: `not-a-git-checkout` (zip or marketplace install), `offline`, `foreign-remote` (vendored inside another project), `local-changes`, `local-ahead`, `diverged`, `detached-head`. Mention it to the user only when they could act on it — `local-changes`, `local-ahead`, `diverged` — and never let it block the lookup.
+
+Run it **once per request**, not before each script call, and never in a loop. It is deliberately timid: fast-forward only, never on a dirty working tree, never on a repo that isn't this skill's, and it exits 0 even when it fails, so a self-update problem can never stop the filings work the user actually asked for.
 
 ## Step 1 — Identify the ticker and its listing venue
 
@@ -107,6 +126,8 @@ One-time setup for the browser-render path:
 pip install playwright
 playwright install chromium
 ```
+
+If Chromium is already on the machine but Playwright refuses to launch it — a pre-provisioned container ships one build while the installed Playwright pins another, which is what Claude Code on the web does — the scripts fall back to the Chromium under `PLAYWRIGHT_BROWSERS_PATH` by themselves. Set `SKILL_CHROMIUM_PATH=/path/to/chrome` to force a specific binary. If no browser can be found at all, the script says so and gives the filing's URL; it never substitutes a reconstruction.
 
 **In claude.ai's sandbox: none of this works for any venue, and that's worth stating plainly rather than working around.** Verified directly: `web_fetch` always extracts/transforms content — including for PDFs. Setting `web_fetch_pdf_extract_text=false` was expected to return raw bytes for an already-PDF filing (the CNINFO/HKEX case), but tested against two real CNINFO PDFs (one 143 pages, one 4 pages) and both came back as extracted text either way, not base64. An earlier version of this doc claimed the binary-mode path let claude.ai retrieve HK/China filings byte-faithfully — that claim was untested and turned out to be wrong; it's corrected here. Combined with the earlier finding that even headless Chromium hits the same network allowlist wall as `bash` (a live `403 Host not in allowlist: www.sec.gov`), there is no tool available in this environment, for any of the three venues, that returns a filing's original bytes. The honest response is to give the person the direct URL so they can open or download it themselves — not to hand over extracted text or a reconstruction and imply it's the same thing.
 

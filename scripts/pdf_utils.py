@@ -37,6 +37,8 @@ forces a specific binary.
 """
 from __future__ import annotations
 
+from net_errors import SetupError
+
 
 # Some environments (Claude Code on the web) ship Chromium at a fixed
 # path rather than the build Playwright pins, so a plain launch() fails
@@ -99,8 +101,13 @@ def _launch_chromium(playwright):
     except Exception as exc:
         fallback = _bundled_chromium()
         if not fallback:
-            raise RuntimeError(f"{SETUP_HINT} (launch failed: {exc})") from None
-        return playwright.chromium.launch(executable_path=fallback)
+            raise SetupError(f"{SETUP_HINT} (launch failed: {exc})") from None
+        try:
+            return playwright.chromium.launch(executable_path=fallback)
+        except Exception as fallback_exc:
+            raise SetupError(
+                f"{SETUP_HINT} (launch failed: {exc}; {fallback} also failed: "
+                f"{fallback_exc})") from None
 
 
 def save_pdf_bytes(data: bytes, out_path: str) -> str:
@@ -113,7 +120,8 @@ def save_pdf_bytes(data: bytes, out_path: str) -> str:
 
 
 def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
-                      user_agent: str | None = None) -> str:
+                      user_agent: str | None = None,
+                      prefetched: tuple[bytes, str] | None = None) -> str:
     """Render a URL with a real headless browser and print it to PDF.
 
     This is a faithful browser rendering of the original page, not a
@@ -127,13 +135,18 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
     UA go through fine. So when a user_agent is given, every request
     the browser makes (the page and all its subresources) is
     intercepted and fetched via urllib instead; Chromium only renders.
+
+    prefetched: (bytes, content-type) for `url` itself, when the caller
+    has already downloaded it -- the interceptor serves those bytes
+    instead of asking the host for the same document a second time.
+    Regulators rate-limit, so the saved round trip is worth having.
     """
     import urllib.request
 
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        raise RuntimeError(SETUP_HINT) from None
+        raise SetupError(SETUP_HINT) from None
 
     if not out_path.lower().endswith(".pdf"):
         out_path += ".pdf"
@@ -150,7 +163,10 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
             if user_agent:
                 def _route(route, request):
                     try:
-                        body, ctype = _fetch(request.url)
+                        if prefetched and request.url == url:
+                            body, ctype = prefetched
+                        else:
+                            body, ctype = _fetch(request.url)
                         route.fulfill(status=200, body=body, content_type=ctype)
                     except Exception:
                         route.abort()
@@ -164,10 +180,13 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
 
 
 def save_filing_as_pdf(url: str, data: bytes, out_path: str,
-                       user_agent: str | None = None) -> str:
+                       user_agent: str | None = None,
+                       content_type: str = "text/html") -> str:
     """Given a URL and its already-downloaded bytes, save the original
     faithfully: raw save if it's already a PDF, real-browser render if
-    it's HTML. Never reconstructs content."""
+    it's HTML. Never reconstructs content, and never re-downloads the
+    document the caller just handed it."""
     if is_pdf_bytes(data):
         return save_pdf_bytes(data, out_path)
-    return render_url_to_pdf(url, out_path, user_agent=user_agent)
+    return render_url_to_pdf(url, out_path, user_agent=user_agent,
+                             prefetched=(data, content_type))

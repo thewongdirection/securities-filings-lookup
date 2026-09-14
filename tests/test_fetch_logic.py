@@ -217,12 +217,34 @@ class PdfUtilsTest(unittest.TestCase):
                 "/tmp/x.pdf", user_agent="ua")
             render.assert_called_once()
 
+    def test_a_failing_fallback_launch_still_explains_the_fix(self):
+        # Both launches failing used to escape as a raw Playwright error,
+        # which net_errors.run does not catch.
+        playwright = mock.Mock()
+        playwright.chromium.launch.side_effect = [
+            RuntimeError("pinned build missing"), RuntimeError("also broken")]
+        with mock.patch.object(pdf_utils, "_bundled_chromium", return_value="/opt/chrome"):
+            with self.assertRaises(net_errors.SetupError) as caught:
+                pdf_utils._launch_chromium(playwright)
+        self.assertIn("playwright install chromium", str(caught.exception))
+        self.assertIn("also broken", str(caught.exception))
+
+    def test_the_renderer_is_handed_bytes_the_caller_already_downloaded(self):
+        # Re-fetching the same document doubles traffic to hosts that
+        # rate-limit, which is what got this session blocked by SEC.
+        with mock.patch.object(pdf_utils, "render_url_to_pdf") as render:
+            pdf_utils.save_filing_as_pdf("https://example.invalid/a.htm",
+                                         b"<html>10-K</html>", "/tmp/a.pdf",
+                                         user_agent="ua")
+        self.assertEqual(render.call_args.kwargs["prefetched"],
+                         (b"<html>10-K</html>", "text/html"))
+
     def test_missing_chromium_explains_the_fix_instead_of_crashing(self):
         playwright = mock.Mock()
         playwright.chromium.launch.side_effect = RuntimeError("Executable doesn't exist")
         with mock.patch.dict("os.environ", {"PLAYWRIGHT_BROWSERS_PATH": ""}, clear=False), \
                 mock.patch.object(pdf_utils, "_bundled_chromium", return_value=None):
-            with self.assertRaises(RuntimeError) as caught:
+            with self.assertRaises(net_errors.SetupError) as caught:
                 pdf_utils._launch_chromium(playwright)
         self.assertIn("playwright install chromium", str(caught.exception))
 
@@ -295,6 +317,43 @@ class NetworkErrorReportingTest(unittest.TestCase):
             OSError("Tunnel connection failed: 403 Forbidden"))
         self.assertIn("network proxy", message)
         self.assertIn("not allowlisted", message)
+
+    def test_a_blocked_tunnel_in_the_shape_urllib_actually_raises(self):
+        # urllib wraps the tunnel OSError in URLError, so a check that only
+        # looked at bare OSErrors never fired in a real cloud container.
+        message = net_errors.explain(
+            urllib.error.URLError(OSError("Tunnel connection failed: 403 Forbidden")))
+        self.assertIn("network proxy", message)
+        self.assertIn("not allowlisted", message)
+        self.assertIn("Network access", message)
+
+    def test_filesystem_errors_are_not_dressed_up_as_network_errors(self):
+        for exc in (PermissionError(13, "Permission denied", "/root/filings"),
+                    FileNotFoundError(2, "No such file or directory", "/nope/x.pdf"),
+                    OSError(28, "No space left on device")):
+            with self.subTest(error=type(exc).__name__):
+                message = net_errors.explain(exc)
+                self.assertIn("not a network problem", message)
+                self.assertNotIn("web search", message)
+
+    def test_a_setup_error_prints_its_message_without_a_traceback(self):
+        def boom():
+            raise net_errors.SetupError("install chromium, then retry")
+
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+            net_errors.run(boom)
+        self.assertIn("install chromium", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_an_ordinary_runtime_error_keeps_its_traceback(self):
+        # A parser break is a bug, not something the user can act on --
+        # swallowing it into one line hid where it happened.
+        def boom():
+            raise RuntimeError("no temporary link in step-9 response")
+
+        with self.assertRaises(RuntimeError):
+            net_errors.run(boom)
 
     def test_tls_failure_points_at_certifi(self):
         message = net_errors.explain(

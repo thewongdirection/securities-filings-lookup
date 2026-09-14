@@ -42,7 +42,13 @@ It fast-forwards the checkout this skill lives in to `origin`'s latest commit on
 - **`updated`** — the files on disk just changed under you. **Re-read `SKILL.md` from disk before going further**, along with whichever `references/*.md` the request needs, and run the scripts as they are on disk. What was loaded into the conversation when the skill triggered is the previous version; the `files:` line says what changed.
 - **`up-to-date`** — carry on.
 - **`update-available`** — only with `--check-only`; run it again without the flag to actually take the update.
-- **`skipped`** — carry on with the local copy, which is the best available version. The `reason:` line says why: `not-a-git-checkout` (zip or marketplace install), `offline`, `foreign-remote` (vendored inside another project), `local-changes`, `local-ahead`, `diverged`, `detached-head`. Mention it to the user only when they could act on it — `local-changes`, `local-ahead`, `diverged` — and never let it block the lookup.
+- **`skipped`** — carry on with the local copy, which is the best available version, whatever the reason. The `reason:` line says which:
+  - *Nothing to update from*: `not-a-git-checkout` (zip or marketplace install), `no-origin-remote`, `no-remote-branch`, `offline`, `git-unavailable`.
+  - *Not this skill's repository*: `foreign-remote` (vendored inside another project), `unrelated-repo` (the enclosing repo doesn't track this skill — a dotfiles checkout, say), `not-a-skill-directory`.
+  - *Your copy has moved on*: `local-changes`, `local-ahead`, `diverged`, `detached-head`.
+  - *Something went wrong mid-update*: `merge-failed`, `unreadable-refs`, `unsafe-branch-name`, `no-branch`.
+
+  Mention it to the user only when they could act on it — `local-changes`, `local-ahead`, `diverged`, `no-origin-remote`, `unrelated-repo` — and never let any of it block the lookup. An unfamiliar reason gets the same response: use the local copy and carry on.
 
 Run it **once per request**, not before each script call, and never in a loop. It is deliberately timid: fast-forward only, never on a dirty working tree, never on a repo that isn't this skill's, and it exits 0 even when it fails, so a self-update problem can never stop the filings work the user actually asked for.
 

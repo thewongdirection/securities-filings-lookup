@@ -33,7 +33,7 @@ import gzip
 import urllib.error
 import urllib.request
 
-from pdf_utils import is_pdf_bytes, save_pdf_bytes, render_url_to_pdf
+from pdf_utils import save_filing_as_pdf
 from net_errors import run
 
 # SEC's fair-access policy wants a descriptive User-Agent identifying
@@ -52,6 +52,11 @@ INDEX_URL = ("https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/"
 # primaryDocument silently hands back the wrapper, so EX-13 is fetched
 # alongside it by default.
 DEFAULT_EXHIBITS = "EX-13"
+
+# Forms whose accession index is worth reading for an EX-13. A quarterly
+# report or an 8-K never carries one, and the lookup is a round trip
+# against a host that rate-limits.
+ANNUAL_REPORT_FORMS = {"10-K", "10-K405", "10-KSB", "20-F", "40-F", "11-K"}
 
 
 def _get(url: str) -> bytes:
@@ -216,6 +221,8 @@ def fetch_exhibits(row: dict, wanted: list[str]) -> list[dict]:
     """
     if not wanted:
         return []
+    if base_form(row["form"]) not in ANNUAL_REPORT_FORMS:
+        return []
     url = INDEX_URL.format(cik=row["cik"], accession=row["accession"],
                            accession_dashed=row["accession_dashed"])
     try:
@@ -228,41 +235,80 @@ def fetch_exhibits(row: dict, wanted: list[str]) -> list[dict]:
     return select_exhibits(parse_index_documents(html), wanted)
 
 
-def out_name(ticker: str, form: str, filed: str, exhibit_type: str | None = None) -> str:
+def base_form(form: str) -> str:
+    """"10-K/A" -> "10-K": the form without its amendment suffix."""
+    return form.split("/")[0].strip().upper()
+
+
+def out_name(ticker: str, form: str, filed: str, exhibit_type: str | None = None,
+             suffix: str | None = None) -> str:
     """{TICKER}_{FORM}_{DATE}.pdf, per SKILL.md.
 
     Without the ticker a folder of filings from several companies is
-    unsortable, and two filers of the same form on the same day collide.
+    unsortable. suffix disambiguates the remaining collision: one filer
+    can file two of the same form on the same day (8-Ks routinely do),
+    and those are different documents.
     """
     safe_form = form.replace("/", "-")
     if exhibit_type:
         safe_form = f"{safe_form}-{exhibit_type.replace('/', '-')}"
-    return f"{ticker.upper()}_{safe_form}_{filed}.pdf"
+    tail = f"_{suffix}" if suffix else ""
+    return f"{ticker.upper()}_{safe_form}_{filed}{tail}.pdf"
+
+
+def _claim_name(used: set[str], name: str, accession: str) -> str:
+    """A name no earlier document in this run has taken.
+
+    Overwriting a file from an earlier run is fine -- it is the same
+    document -- but two documents in one run must never collide.
+    """
+    if name not in used:
+        used.add(name)
+        return name
+    stem, ext = os.path.splitext(name)
+    candidate = f"{stem}_{accession[-6:]}{ext}"
+    n = 2
+    while candidate in used:
+        candidate = f"{stem}_{accession[-6:]}-{n}{ext}"
+        n += 1
+    used.add(candidate)
+    return candidate
 
 
 def save_document(url: str, out_path: str) -> str:
-    data = _get(url)
-    if is_pdf_bytes(data):
-        return save_pdf_bytes(data, out_path)
-    return render_url_to_pdf(url, out_path, user_agent=USER_AGENT)
+    """Save one document: raw bytes if it is already a PDF, otherwise a
+    real browser render of the page -- handing the renderer the bytes we
+    already have so the host is not asked for the same document twice."""
+    return save_filing_as_pdf(url, _get(url), out_path, user_agent=USER_AGENT)
 
 
 def save_rows(rows: list[dict], ticker: str, save_dir: str,
               exhibits: list[str]) -> list[str]:
     os.makedirs(save_dir, exist_ok=True)
     saved_paths = []
+    used_names: set[str] = set()
     for r in rows:
         time.sleep(0.15)
-        out_path = os.path.join(save_dir, out_name(ticker, r["form"], r["filed"]))
-        saved = save_document(r["url"], out_path)
+        name = _claim_name(used_names, out_name(ticker, r["form"], r["filed"]),
+                           r["accession"])
+        saved = save_document(r["url"], os.path.join(save_dir, name))
         saved_paths.append(saved)
         print(f"{r['filed']}  {r['form']:<10}  -> {saved}")
 
         for ex in fetch_exhibits(r, exhibits):
             time.sleep(0.15)
-            ex_path = os.path.join(
-                save_dir, out_name(ticker, r["form"], r["filed"], ex["type"]))
-            saved_ex = save_document(ex["url"], ex_path)
+            ex_name = _claim_name(
+                used_names,
+                out_name(ticker, r["form"], r["filed"], ex["type"]),
+                r["accession"])
+            try:
+                saved_ex = save_document(ex["url"], os.path.join(save_dir, ex_name))
+            except (urllib.error.URLError, OSError) as exc:
+                # The filing itself is already saved, and the filings after
+                # this one still need fetching -- one bad exhibit is not
+                # worth ending the run.
+                print(f"    + {ex['type']:<8} could not be saved ({exc})")
+                continue
             saved_paths.append(saved_ex)
             print(f"    + {ex['type']:<8} {ex['description'][:40]:<40} -> {saved_ex}")
     return saved_paths

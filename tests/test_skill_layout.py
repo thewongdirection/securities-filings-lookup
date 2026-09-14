@@ -77,6 +77,23 @@ class SkillDefinitionTest(unittest.TestCase):
                 self.assertIn(expected, step0)
 
 
+class SkipReasonDocumentationTest(unittest.TestCase):
+    """Step 0 tells the model how to react to `reason:` -- so every reason
+    the script can emit has to appear there. Six were undocumented."""
+
+    def test_every_reason_the_script_emits_is_in_skill_md(self):
+        source = (ROOT / "scripts" / "update_skill.py").read_text(encoding="utf-8")
+        reasons = set(re.findall(r'skip\(\s*\n?\s*"([a-z-]+)"', source))
+        reasons |= set(re.findall(r'report\.add\("reason", "([a-z-]+)"\)', source))
+        self.assertTrue(reasons)
+        step0 = (SKILL_MD.read_text(encoding="utf-8")
+                 .split("## Step 0", 1)[1].split("## Step 1", 1)[0])
+        missing = sorted(r for r in reasons if r not in step0)
+        self.assertEqual(missing, [],
+                         f"update_skill.py can emit reasons SKILL.md never "
+                         f"mentions: {missing}")
+
+
 class ScriptHealthTest(unittest.TestCase):
     def test_all_scripts_compile(self):
         for script in SCRIPTS:

@@ -67,9 +67,14 @@ def differences() -> list[str]:
     return problems
 
 
-def sync() -> list[str]:
-    """Make the project copy match the canonical skill. Returns what changed."""
-    changed = differences()
+def sync(changed: list[str] | None = None) -> list[str]:
+    """Make the project copy match the canonical skill. Returns what changed.
+
+    Pass an already-computed differences() list to avoid walking and
+    byte-comparing the whole mirrored tree a second time.
+    """
+    if changed is None:
+        changed = differences()
     if not changed:
         return []
     PROJECT_COPY.mkdir(parents=True, exist_ok=True)
@@ -103,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     if not problems:
         print("project skill copy is already in sync")
         return 0
-    sync()
+    sync(problems)
     print(f"synced {len(problems)} path(s) into {PROJECT_COPY.relative_to(SKILL_ROOT)}:")
     for line in problems:
         print(f"  {line}")

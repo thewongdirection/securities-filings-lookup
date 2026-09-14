@@ -35,6 +35,7 @@ import ssl
 import urllib.request
 
 from pdf_utils import is_pdf_bytes, render_url_to_pdf, save_pdf_bytes
+from net_errors import run
 
 DEFAULT_UA = "securities-filings-lookup-skill contact@example.com"
 
@@ -80,4 +81,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

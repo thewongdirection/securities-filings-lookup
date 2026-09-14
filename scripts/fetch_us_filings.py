@@ -29,6 +29,7 @@ import gzip
 import urllib.request
 
 from pdf_utils import is_pdf_bytes, save_pdf_bytes, render_url_to_pdf
+from net_errors import run
 
 # SEC's fair-access policy wants a descriptive User-Agent identifying
 # the requester. Customize this before heavy/repeated use.
@@ -171,4 +172,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

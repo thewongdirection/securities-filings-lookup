@@ -61,6 +61,15 @@ class ValidationTest(unittest.TestCase):
             "securities-filings-lookup (https://github.com/o/securities-filings-lookup)")
         self.assertIn("403", problem)
 
+    def test_a_plus_tagged_address_is_accepted(self):
+        # The recommended shape: it reaches the user, is filterable, and
+        # keeps their main address out of the header. Verified against SEC
+        # live (200), so the local-part '+' must survive validation.
+        for tagged in ("someone someone+sec@gmail.com",
+                       "Ops Team filings+edgar@company.co.uk"):
+            with self.subTest(value=tagged):
+                self.assertIsNone(sec_identity.validate(tagged))
+
     def test_a_real_domain_resembling_a_placeholder_is_still_fine(self):
         # "examples.com" is not "example.com".
         self.assertIsNone(sec_identity.validate("Team ops@examples.com"))

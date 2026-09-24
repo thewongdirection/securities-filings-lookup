@@ -95,15 +95,15 @@ SEC's fair-access policy requires automated clients to declare who they are, and
 
 | User-Agent | Result |
 |---|---|
-| `Securities Filings Lookup admin@example-real-domain.com` | 200 |
-| `securities-filings-lookup/1.0 contact@thewongdirection.dev` | 200 |
+| `Securities Filings Lookup admin@<your-domain>` | 200 |
+| `securities-filings-lookup/1.0 contact@<your-domain>` | 200 |
 | `securities-filings-lookup (https://github.com/...)` — no address | **403** |
 
 So the US scripts refuse to send anything until a contact is configured, rather than inventing one. `scripts/sec_identity.py` resolves it in this order: `--user-agent`, then `$SEC_USER_AGENT`, then `sec_user_agent.txt` next to this file (gitignored — a personal address never syncs through the repo).
 
 **The first time a request needs it**, the scripts fail with instructions. Then:
 
-1. **Ask the user** for a name and email address they are willing to send to SEC (AskUserQuestion where available). It is their address going to a third party, so never supply one on their behalf, and never reuse an address you happen to know from elsewhere in the conversation without asking. Say plainly that SEC receives it with every request.
+1. **Ask the user** for a name and email address they are willing to send to SEC (AskUserQuestion where available). It is their address going to a third party, so never supply one on their behalf, and never reuse an address you happen to know from elsewhere in the conversation without asking. Say plainly that SEC receives it with every request. If they want to keep their main address out of it, suggest a plus tag — `them+sec@gmail.com` reaches them, filters cleanly, and SEC accepts it. If they suggest inventing one, say once that a made-up `word42@gmail.com` is likely a real stranger's mailbox, so the contact SEC is given points at someone uninvolved; then do as they decide.
 2. **Remember it** — write the single line `Their Name their.email@domain.com` to `sec_user_agent.txt` next to `SKILL.md`, so later sessions don't ask again.
 3. **If they decline**, say what that costs: no SEC EDGAR fetches or PDF saves this session. Give them the EDGAR URLs to open themselves, and carry on with any other venue in the request — the other six need no contact.
 

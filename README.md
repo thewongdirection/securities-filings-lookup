@@ -59,6 +59,8 @@ Two consequences worth knowing:
   echo '<Your Name> <you@your-provider.com>' > ~/.claude/skills/securities-filings-lookup/sec_user_agent.txt
   ```
   Any single run can also pass `--user-agent`. Until one of those is set, the US scripts refuse to send a request and print how to fix it — they never substitute a made-up address. The other six venues need no contact.
+
+  **Use an address that reaches you.** A plus tag is the tidy option — `you+sec@gmail.com` filters SEC mail into its own bucket without exposing your main address, and SEC accepts it (verified: 200). Avoid inventing a plausible-looking mailbox: `somename42@gmail.com` is probably a real stranger's, so SEC's contact requirement ends up pointing at someone uninvolved, and anything at `example.com` reaches nobody at all — both are rejected or useless.
 - **Python 3.10+** on PATH. Lookups and Hong Kong / China PDF saves use only the standard library.
 - **For saving US SEC filings as PDFs** (one-time setup, the skill will prompt/do it when first needed):
   ```

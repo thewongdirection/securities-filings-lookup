@@ -12,12 +12,16 @@ source without documenting it fails here instead of in a user's session.
 from __future__ import annotations
 
 import re
+import sys
 import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 README = ROOT / "README.md"
+
+import sec_identity  # noqa: E402
 
 URL_RE = re.compile(r"https?://[^\s'\"`)>\]}|]+")
 HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
@@ -49,6 +53,11 @@ EXEMPT = {
     # is never fetched, so it must not be on an allowlist either.
     "gcs-web.com",
 }
+
+# Domains sec_identity names in order to REJECT them as fake contacts.
+# Scoped to that module: exempting them everywhere would hide a future
+# venue script that really did fetch from company.com.
+PER_FILE_EXEMPT = {"sec_identity.py": set(sec_identity.PLACEHOLDER_DOMAINS)}
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 
@@ -92,7 +101,8 @@ def hosts_in(path: Path) -> set[str]:
             found.add(host)
     # An address like your-email@domain.com is not a host to allowlist.
     found |= set(BARE_HOST_RE.findall(EMAIL_RE.sub(" ", text)))
-    return {h for h in found if h not in EXEMPT}
+    exempt = EXEMPT | PER_FILE_EXEMPT.get(path.name, set())
+    return {h for h in found if h not in exempt}
 
 
 def covered_by(host: str, documented: set[str]) -> bool:
@@ -167,6 +177,11 @@ class EgressAllowlistTest(unittest.TestCase):
         self.assertTrue(covered_by("cninfo.com.cn", documented))
         self.assertTrue(covered_by("www.cninfo.com.cn", documented))
         self.assertFalse(covered_by("api.cninfo.com.cn", documented))
+
+    def test_the_placeholder_exemption_is_scoped_to_one_module(self):
+        # company.com is exempt where sec_identity rejects it, and nowhere else.
+        self.assertIn("company.com", PER_FILE_EXEMPT["sec_identity.py"])
+        self.assertNotIn("company.com", EXEMPT)
 
     def test_email_addresses_are_not_hosts(self):
         self.assertEqual(

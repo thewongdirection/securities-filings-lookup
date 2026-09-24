@@ -32,12 +32,17 @@ from __future__ import annotations
 import argparse
 import os
 import ssl
+import urllib.parse
 import urllib.request
 
+import sec_identity
 from pdf_utils import is_pdf_bytes, save_filing_as_pdf
 from net_errors import run
 
-DEFAULT_UA = "securities-filings-lookup-skill contact@example.com"
+# Only SEC demands a declared contact; the other venues are happier with
+# an ordinary client string. Resolved per URL, because this script takes
+# any filing URL from any venue.
+GENERIC_UA = f"securities-filings-lookup (+{sec_identity.PROJECT_URL})"
 
 
 def _context() -> ssl.SSLContext:
@@ -51,9 +56,31 @@ def _context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
-def peek(url: str, user_agent: str = DEFAULT_UA) -> bytes:
-    """Fetch the URL's bytes -- just enough to tell if it's already a PDF."""
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent})
+def is_sec(url: str) -> bool:
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return host == "sec.gov" or host.endswith(".sec.gov")
+
+
+def user_agent_for(url: str, explicit: str | None = None) -> str:
+    """The User-Agent for this URL's host.
+
+    SEC needs a declared contact and raises if none is configured; the
+    other venues are happy with an ordinary client string.
+    """
+    if is_sec(url):
+        return sec_identity.resolve(explicit)
+    return explicit or GENERIC_UA
+
+
+def peek(url: str, user_agent: str | None = None) -> bytes:
+    """Fetch the URL's bytes -- just enough to tell if it's already a PDF.
+
+    Without an explicit User-Agent the host decides: SEC gets the declared
+    contact it requires, everything else the generic client string. The
+    old default sent an address-less string to SEC, which returns 403.
+    """
+    req = urllib.request.Request(
+        url, headers={"User-Agent": user_agent or user_agent_for(url)})
     with urllib.request.urlopen(req, timeout=60, context=_context()) as resp:
         return resp.read()
 
@@ -67,15 +94,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url")
     parser.add_argument("--out", help="Output path (default: derived from the URL)")
+    parser.add_argument("--user-agent",
+                        help="Contact for SEC's fair-access policy, e.g. "
+                             "'Your Name you@domain.com'")
     args = parser.parse_args()
 
     out_path = args.out or default_out_path(args.url)
-    data = peek(args.url)
+    user_agent = user_agent_for(args.url, args.user_agent)
+    data = peek(args.url, user_agent)
 
     already_pdf = is_pdf_bytes(data)
     # The bytes are already in hand from peek(); handing them over means
     # the host is not asked for the same document a second time.
-    saved = save_filing_as_pdf(args.url, data, out_path, user_agent=DEFAULT_UA)
+    saved = save_filing_as_pdf(args.url, data, out_path, user_agent=user_agent)
     if already_pdf:
         print(f"Already a PDF -- saved as-is: {saved}")
     else:

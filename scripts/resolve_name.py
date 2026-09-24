@@ -35,6 +35,7 @@ import time
 import urllib.parse
 import urllib.request
 
+import sec_identity
 from net_errors import run
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -54,8 +55,9 @@ def _context() -> ssl.SSLContext:
 CTX = _context()
 
 
-def _get(url: str, timeout: int = 30) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def _get(url: str, timeout: int = 30, user_agent: str | None = None) -> bytes:
+    req = urllib.request.Request(
+        url, headers={"User-Agent": user_agent or USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout, context=CTX) as resp:
         return resp.read()
 
@@ -67,7 +69,11 @@ def _post(url: str, data: bytes, content_type: str, timeout: int = 30) -> bytes:
         return resp.read()
 
 
-def _cached_json(cache_name: str, url: str, ttl: int = 86400):
+def _cached_json(cache_name: str, url: str, ttl: int = 86400,
+                 user_agent=None):
+    """Cached JSON fetch. `user_agent` may be a callable, resolved only on
+    a cache miss -- SEC needs a declared contact to make a request, not to
+    read yesterday's answer off disk."""
     cache = os.path.join(tempfile.gettempdir(), cache_name)
     try:
         if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < ttl:
@@ -75,7 +81,7 @@ def _cached_json(cache_name: str, url: str, ttl: int = 86400):
                 return json.load(f)
     except (OSError, json.JSONDecodeError):
         pass
-    raw = _get(url)
+    raw = _get(url, user_agent=user_agent() if callable(user_agent) else user_agent)
     data = json.loads(raw.decode())
     try:
         with open(cache, "wb") as f:
@@ -85,12 +91,20 @@ def _cached_json(cache_name: str, url: str, ttl: int = 86400):
     return data
 
 
+SEC_USER_AGENT_OVERRIDE: str | None = None
+
+
 def search_us(q: str) -> list[tuple[str, str, str]]:
     ql = q.lower()
     out = []
     try:
-        data = _cached_json("sec_company_tickers.json",
-                            "https://www.sec.gov/files/company_tickers.json")
+        # SEC's edge blocks browser-spoofed clients -- the module-level
+        # Mozilla UA that suits the other venues is exactly what gets
+        # 403'd here, so this request declares itself properly.
+        data = _cached_json(
+            "sec_company_tickers.json",
+            "https://www.sec.gov/files/company_tickers.json",
+            user_agent=lambda: sec_identity.resolve(SEC_USER_AGENT_OVERRIDE))
     except Exception as e:
         return [("us", "ERROR", str(e))]
     for entry in data.values():
@@ -199,7 +213,13 @@ def main() -> None:
     parser.add_argument("--venues", default="us,hk,cn,tw,uk,jp",
                         help="Comma-separated subset of us,hk,cn,tw,uk,jp "
                              "(no directory exists for Germany -- web search)")
+    parser.add_argument("--user-agent",
+                        help="Contact for SEC's fair-access policy, e.g. "
+                             f"'{sec_identity.EXAMPLE_CONTACT}'")
     args = parser.parse_args()
+
+    global SEC_USER_AGENT_OVERRIDE
+    SEC_USER_AGENT_OVERRIDE = args.user_agent
 
     any_hit = False
     for v in args.venues.split(","):
@@ -208,7 +228,10 @@ def main() -> None:
             continue
         for venue, code, name in fn(args.name):
             print(f"{venue:<3} {code:<12} {name}")
-            any_hit = True
+            # An ERROR or SKIPPED row is a venue that could not answer, not
+            # a candidate -- counting it suppresses the fallback advice.
+            if code not in ("ERROR", "SKIPPED"):
+                any_hit = True
     if not any_hit:
         print("No candidates found in any venue directory. Fall back to a web "
               "search for '<name> stock ticker' and confirm with the user.")

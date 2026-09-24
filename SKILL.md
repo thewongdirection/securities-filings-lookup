@@ -89,6 +89,26 @@ Once a ticker is confirmed (or defaulted), continue with the normal flow below �
 - The company might be a **Chinese ADR** — BABA, JD, PDD, NIO, BIDU, and similar tickers are alphabetic and look "US-listed" by format, and *are* filed with the SEC (20-F/6-K) as foreign private issuers — but the underlying operating business is Chinese, and some of these also carry a secondary Hong Kong listing with its own separate HKEX filings. See "Dual-listed tickers" below: ask which market's filings are required.
 - The company recently IPO'd, was acquired, delisted, or renamed — ticker-to-venue mappings can go stale.
 
+## SEC filings need a contact address before the first request
+
+SEC's fair-access policy requires automated clients to declare who they are, and its edge enforces it: a `User-Agent` carrying an **email address** is served, one carrying only a project URL gets `403`. Measured against a live Archives document (2026-09):
+
+| User-Agent | Result |
+|---|---|
+| `Securities Filings Lookup admin@example-real-domain.com` | 200 |
+| `securities-filings-lookup/1.0 contact@thewongdirection.dev` | 200 |
+| `securities-filings-lookup (https://github.com/...)` — no address | **403** |
+
+So the US scripts refuse to send anything until a contact is configured, rather than inventing one. `scripts/sec_identity.py` resolves it in this order: `--user-agent`, then `$SEC_USER_AGENT`, then `sec_user_agent.txt` next to this file (gitignored — a personal address never syncs through the repo).
+
+**The first time a request needs it**, the scripts fail with instructions. Then:
+
+1. **Ask the user** for a name and email address they are willing to send to SEC (AskUserQuestion where available). It is their address going to a third party, so never supply one on their behalf, and never reuse an address you happen to know from elsewhere in the conversation without asking. Say plainly that SEC receives it with every request.
+2. **Remember it** — write the single line `Their Name their.email@domain.com` to `sec_user_agent.txt` next to `SKILL.md`, so later sessions don't ask again.
+3. **If they decline**, say what that costs: no SEC EDGAR fetches or PDF saves this session. Give them the EDGAR URLs to open themselves, and carry on with any other venue in the request — the other six need no contact.
+
+A placeholder (`contact@example.com`), a documentation domain, or a browser-spoofed `Mozilla/...` string is rejected with the reason: the first two reach nobody, and the third is precisely what SEC blocks.
+
 ## Step 2 — Retrieve filings from the correct source
 
 Route to the matching reference file for the exact mechanics, URL patterns, and a bundled script where one exists:
@@ -123,7 +143,7 @@ Save the actual document — not a reconstruction of its content. All venues rou
 
 **Do not try to reconstruct a filing's content from extracted text.** An earlier version of this skill parsed filing HTML (or web_fetch's markdown-extracted text) and rebuilt a new PDF from scratch. That produces something readable, but it is a different document — different layout, different table structure, everything rebuilt except the underlying numbers. If a real browser render isn't available, say so and hand back the original URL. Don't substitute a reconstruction and present it as the filing.
 
-**Some filers put the annual report in an exhibit.** IBM's 10-K *form* is ~30 pages of cross-references; the MD&A, the consolidated statements and the audit report live in **EX-13**, incorporated by reference, in the same accession. Saving only the primary document there hands the user a wrapper with no financials in it. `fetch_us_filings.py --save-dir` now reads the filing's index and saves any `EX-13` alongside the primary document by default (`--exhibits EX-13,EX-21` to widen, `--no-exhibits` to turn it off). If you ever save a 10-K by URL with `save_filing.py` instead, check the accession index yourself — `https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{accession-dashed}-index.htm` — and pull the EX-13 too. A 10-K that renders to ~30 pages is the tell.
+**Some filers put the annual report in an exhibit.** IBM's 10-K *form* is ~30 pages of cross-references; the MD&A, the consolidated statements and the audit report live in **EX-13**, incorporated by reference, in the same accession. Saving only the primary document there hands the user a wrapper with no financials in it. `fetch_us_filings.py --save-dir` now reads the filing's index and saves any `EX-13` alongside the primary document by default (`--exhibits EX-13,EX-21` to widen, `--no-exhibits` to turn it off). **10-K filers only**: a 20-F numbers exhibits differently, where 13.x is a Sarbanes-Oxley certification rather than a report, and a foreign private issuer's 20-F is self-contained anyway (ARM's FY2026 20-F is 216 pages on its own). If you ever save a 10-K by URL with `save_filing.py` instead, check the accession index yourself — `https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{accession-dashed}-index.htm` — and pull the EX-13 too. A 10-K that renders to ~30 pages is the tell.
 
 **With real network access (Claude Code, Claude Desktop):**
 

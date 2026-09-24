@@ -29,6 +29,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import fetch_us_filings as us  # noqa: E402
 import pdf_utils  # noqa: E402
 
+# Every SEC request now resolves a declared contact; these tests are about
+# the save loop, not the configuration, so they stub one in.
+TEST_CONTACT = "Test Runner tests@realdomain.test"
+
 FIXTURE = (ROOT / "tests" / "fixtures" / "edgar_index_ibm_10k.html").read_text(
     encoding="utf-8")
 
@@ -124,6 +128,9 @@ class SaveRowsTest(unittest.TestCase):
     """The save loop, with the network and the browser stubbed out."""
 
     def setUp(self):
+        ua = mock.patch.object(us, "user_agent", return_value=TEST_CONTACT)
+        ua.start()
+        self.addCleanup(ua.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = self.tmp.name
@@ -265,6 +272,17 @@ class SaveRowsTest(unittest.TestCase):
         render.assert_not_called()
         self.assertEqual(Path(saved[0]).read_bytes(), b"%PDF-1.4\noriginal bytes\n")
 
+    def test_the_declared_contact_reaches_the_renderer(self):
+        with mock.patch.object(us, "_get", self._fake_get), \
+                mock.patch.object(pdf_utils, "render_url_to_pdf",
+                                  side_effect=self._fake_render) as render, \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()):
+            us.save_rows([dict(ROW)], "IBM", self.dir, [])
+        sent = render.call_args.kwargs["user_agent"]
+        self.assertEqual(sent, TEST_CONTACT)
+        self.assertTrue(sent, "an empty UA disables route interception")
+
     def test_an_html_filing_is_downloaded_once_not_twice(self):
         # save_document used to fetch the document and then let the
         # renderer fetch the identical URL again -- double traffic to a
@@ -291,6 +309,9 @@ class SameDayCollisionTest(unittest.TestCase):
     """One filer can file two of the same form on one day (8-Ks do)."""
 
     def setUp(self):
+        ua = mock.patch.object(us, "user_agent", return_value=TEST_CONTACT)
+        ua.start()
+        self.addCleanup(ua.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
@@ -333,6 +354,10 @@ class SameDayCollisionTest(unittest.TestCase):
         self.assertNotEqual(first, second)
 
 
+ARM_FIXTURE = (ROOT / "tests" / "fixtures" / "edgar_index_arm_20f.html").read_text(
+    encoding="utf-8")
+
+
 class ExhibitScopeTest(unittest.TestCase):
     """The index lookup is a round trip against a host that rate-limits."""
 
@@ -343,14 +368,42 @@ class ExhibitScopeTest(unittest.TestCase):
                     self.assertEqual(us.fetch_exhibits(dict(ROW, form=form), ["EX-13"]), [])
                 get.assert_not_called()
 
-    def test_annual_reports_and_their_amendments_do_check(self):
-        for form in ("10-K", "10-K/A", "20-F", "40-F"):
+    def test_ten_k_and_its_amendments_do_check(self):
+        for form in ("10-K", "10-K/A", "10-K405"):
             with self.subTest(form=form):
                 with mock.patch.object(us, "_get",
                                        return_value=FIXTURE.encode("utf-8")), \
                         mock.patch.object(us.time, "sleep"):
                     found = us.fetch_exhibits(dict(ROW, form=form), ["EX-13"])
                 self.assertEqual([d["type"] for d in found], ["EX-13"])
+
+    def test_a_20f_is_self_contained_so_its_ex13_is_left_alone(self):
+        # Found live: ARM Holdings' FY2026 20-F carries an EX-13.1 that is a
+        # one-page Sarbanes-Oxley 906 certification, not an annual report --
+        # 13.x means something different under 20-F exhibit numbering. The
+        # 216-page report was the primary document all along.
+        for form in ("20-F", "40-F"):
+            with self.subTest(form=form):
+                with mock.patch.object(us, "_get") as get:
+                    self.assertEqual(
+                        us.fetch_exhibits(dict(ROW, form=form), ["EX-13"]), [])
+                get.assert_not_called()
+
+    def test_a_certification_is_never_delivered_as_a_report(self):
+        # Belt and braces for a 10-K filer numbering its exhibits oddly.
+        with mock.patch.object(us, "_get",
+                               return_value=ARM_FIXTURE.encode("utf-8")), \
+                mock.patch.object(us.time, "sleep"):
+            found = us.fetch_exhibits(dict(ROW, form="10-K"), ["EX-13"])
+        self.assertEqual(found, [])
+
+    def test_the_certification_detector(self):
+        self.assertTrue(us._is_certification(
+            {"description": "EX-13.1", "document": "ex131-ceocertfye26.htm"}))
+        self.assertTrue(us._is_certification(
+            {"description": "CERTIFICATION OF CEO", "document": "x.htm"}))
+        self.assertFalse(us._is_certification(
+            {"description": "EX-13", "document": "ibm-20251231_d2.htm"}))
 
     def test_base_form_strips_the_amendment_suffix(self):
         self.assertEqual(us.base_form("10-K/A"), "10-K")

@@ -20,7 +20,7 @@ What it does under the hood:
 3. Builds the direct document URL: `https://www.sec.gov/Archives/edgar/data/{cik}/{accession-no-dashes}/{primaryDocument}`.
 
 Requirements the script already handles, but worth knowing:
-- SEC's "fair access" policy requires a descriptive `User-Agent` header (e.g. `Company/Contact your-email@domain.com`) — anonymous/browser-spoofed UAs can get 403'd. Customize the `USER_AGENT` constant in the script if you hit this.
+- **The `User-Agent` must carry an email address.** SEC's "fair access" policy asks clients to declare themselves, and the edge enforces it rather than merely requesting it. Tested live (2026-09) against `.../ibm-20251231x10kex311.htm`: `securities-filings-lookup-skill contact@example.com` → 200, `Securities Filings Lookup admin@<domain>` → 200, `securities-filings-lookup/1.0 contact@<domain>` → 200, but `securities-filings-lookup (https://github.com/...)` — identical minus the address — → **403**. A browser-spoofed `Mozilla/...` is also blocked. So there is no working anonymous form: the scripts resolve a real contact through `scripts/sec_identity.py` (`--user-agent` → `$SEC_USER_AGENT` → `sec_user_agent.txt`) and refuse to send without one. Do not hardcode an address, and do not reuse one found elsewhere in the conversation — ask the user, because SEC receives it.
 - Rate limit is 10 requests/second; the script already paces itself, no need to add more delay for single lookups.
 - **Heavy repeated use can still get you rate limited beyond the per-second pacing.** Observed live (2026-07): after many script runs in one day, `www.sec.gov` started returning HTTP 429 (Too Many Requests) on `company_tickers.json` — a sustained block lasting several minutes or more, not a momentary throttle — while `data.sec.gov` kept working. The script now caches the ticker→CIK mapping for a day, which removes the main repeat offender, but if you're looking up many tickers or saving many filings in a session, expect SEC may temporarily block you anyway. If a 429 appears: stop retrying in a loop, wait several minutes, and batch remaining lookups. Tell the user their IP is temporarily rate limited by SEC rather than silently failing.
 - If the ticker isn't in `company_tickers.json` (common for very recent IPOs, SPACs, or funds), fall back to searching by company name via EDGAR full text search: `https://www.sec.gov/edgar/search/#/q=<company name>`.
@@ -79,3 +79,12 @@ Tells that you are looking at a wrapper rather than the real annual
 report: a 10-K that renders to ~30 pages, repeated "incorporated herein
 by reference" in Items 7 and 8, or an accession whose largest document
 is not the primary one.
+
+**EX-13 means this only under 10-K numbering.** A 20-F or 40-F numbers
+its exhibits differently: 13.x there is the Sarbanes-Oxley section 906
+certification. Tested live (2026-09) on ARM Holdings' FY2026 20-F: the
+EX-13.1 is `ex131-ceocertfye26.htm`, a one-page CEO/CFO certification,
+while the 216-page annual report is the primary document. A foreign
+private issuer's 20-F is self-contained, so `fetch_us_filings.py` reads
+the index for 10-K, 10-K405 and 10-KSB only, and skips any exhibit whose
+filename or description marks it a certification.

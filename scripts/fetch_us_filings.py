@@ -19,7 +19,7 @@ Usage:
     python fetch_us_filings.py AAOI --forms 10-K,10-Q --limit 10
     python fetch_us_filings.py AAOI --forms 10-Q --limit 1 --save-dir ./filings
     python fetch_us_filings.py IBM --forms 10-K --limit 1 --save-dir ./filings
-        # also saves EX-13, where the annual report's substance lives
+        # also saves EX-13, where a 10-K filer may keep the annual report
     python fetch_us_filings.py IBM --forms 10-K --save-dir ./filings --no-exhibits
 """
 from __future__ import annotations
@@ -33,13 +33,30 @@ import gzip
 import urllib.error
 import urllib.request
 
-from naming import claim_name, filing_name, safe_filename
+import sec_identity
+from naming import claim_name, filing_name
 from pdf_utils import save_filing_as_pdf
 from net_errors import run
 
-# SEC's fair-access policy wants a descriptive User-Agent identifying
-# the requester. Customize this before heavy/repeated use.
-USER_AGENT = "securities-filings-lookup-skill contact@example.com"
+# SEC's fair-access policy wants every request to declare a real
+# contact, so the User-Agent is configuration, not a constant:
+# --user-agent, then SEC_USER_AGENT, then sec_user_agent.txt. There is no
+# fallback -- a User-Agent without an address is refused by SEC (403).
+#
+# Resolved through user_agent(), not a module global that main() fills
+# in: an empty string would silently disable the route interception in
+# pdf_utils and let headless Chromium hit SEC's edge directly, saving a
+# block page as if it were the filing.
+_EXPLICIT_USER_AGENT: str | None = None
+_RESOLVED_USER_AGENT: str | None = None
+
+
+def user_agent() -> str:
+    """The declared contact, resolved once per process."""
+    global _RESOLVED_USER_AGENT
+    if _RESOLVED_USER_AGENT is None:
+        _RESOLVED_USER_AGENT = sec_identity.resolve(_EXPLICIT_USER_AGENT)
+    return _RESOLVED_USER_AGENT
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
@@ -54,16 +71,30 @@ INDEX_URL = ("https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/"
 # alongside it by default.
 DEFAULT_EXHIBITS = "EX-13"
 
-# Forms whose accession index is worth reading for an EX-13. A quarterly
-# report or an 8-K never carries one, and the lookup is a round trip
-# against a host that rate-limits.
-ANNUAL_REPORT_FORMS = {"10-K", "10-K405", "10-KSB", "20-F", "40-F", "11-K"}
+# Forms where EX-13 means "Annual Report to Security Holders" -- the
+# exhibit a filer can incorporate the substance of its 10-K into.
+#
+# 20-F and 40-F are deliberately absent: their exhibit numbering is
+# different, and 13.x there is the Sarbanes-Oxley section 906
+# certification. Fetching ARM Holdings' FY2026 20-F proved it -- the
+# EX-13.1 that came back was a one-page CEO/CFO certification, while the
+# 216-page annual report was the primary document all along. A foreign
+# private issuer's 20-F is self-contained, so there is nothing to chase.
+EX13_FORMS = {"10-K", "10-K405", "10-KSB"}
+
+# Markers of a certification rather than a report, for a 10-K filer that
+# numbers its exhibits unusually. EDGAR's Description column is often just
+# the exhibit number ("EX-13.1"), so the filename carries the signal:
+# ARM's was ex131-ceocertfye26.htm.
+CERT_DESCRIPTION_MARKERS = ("certif", "906", "302", "sarbanes")
+CERT_FILENAME_MARKER = "cert"
 
 
 def _get(url: str) -> bytes:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"},
+        headers={"User-Agent": user_agent(),
+                 "Accept-Encoding": "gzip, deflate"},
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = resp.read()
@@ -222,7 +253,7 @@ def fetch_exhibits(row: dict, wanted: list[str]) -> list[dict]:
     """
     if not wanted:
         return []
-    if base_form(row["form"]) not in ANNUAL_REPORT_FORMS:
+    if base_form(row["form"]) not in EX13_FORMS:
         return []
     url = INDEX_URL.format(cik=row["cik"], accession=row["accession"],
                            accession_dashed=row["accession_dashed"])
@@ -233,7 +264,20 @@ def fetch_exhibits(row: dict, wanted: list[str]) -> list[dict]:
         print(f"    (could not check {row['form']} exhibits: {exc}; "
               f"primary document only)")
         return []
-    return select_exhibits(parse_index_documents(html), wanted)
+    return [d for d in select_exhibits(parse_index_documents(html), wanted)
+            if not _is_certification(d)]
+
+
+def _is_certification(doc: dict) -> bool:
+    """Is this exhibit a certification rather than a report?
+
+    A second line of defence behind EX13_FORMS: cheap, and it keeps a
+    one-page signature block from being delivered as an annual report.
+    """
+    description = (doc.get("description") or "").lower()
+    if any(marker in description for marker in CERT_DESCRIPTION_MARKERS):
+        return True
+    return CERT_FILENAME_MARKER in (doc.get("document") or "").lower()
 
 
 def base_form(form: str) -> str:
@@ -265,7 +309,7 @@ def save_document(url: str, out_path: str) -> str:
     """Save one document: raw bytes if it is already a PDF, otherwise a
     real browser render of the page -- handing the renderer the bytes we
     already have so the host is not asked for the same document twice."""
-    return save_filing_as_pdf(url, _get(url), out_path, user_agent=USER_AGENT)
+    return save_filing_as_pdf(url, _get(url), out_path, user_agent=user_agent())
 
 
 def _reraise_if_fatal(exc: BaseException) -> None:
@@ -335,7 +379,16 @@ def main() -> None:
                              "some filers incorporate by reference)")
     parser.add_argument("--no-exhibits", action="store_true",
                         help="Save only each filing's primary document")
+    parser.add_argument("--user-agent",
+                        help="Contact SEC's fair-access policy asks for, e.g. "
+                             "'Your Name you@domain.com'. Otherwise "
+                             f"{sec_identity.ENV_VAR} or "
+                             f"{sec_identity.CONFIG_FILENAME} is used.")
     args = parser.parse_args()
+
+    global _EXPLICIT_USER_AGENT
+    _EXPLICIT_USER_AGENT = args.user_agent
+    user_agent()  # fail here, before any request, if no contact is configured
 
     forms = [f.strip().upper() for f in args.forms.split(",")] if args.forms else None
 

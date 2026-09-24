@@ -25,10 +25,22 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import sync_project_skill  # noqa: E402
 
 SKILL_MD = ROOT / "SKILL.md"
+
+
+def step_zero(text: str) -> str:
+    """Step 0's own prose: up to the NEXT top-level heading, whatever it is.
+
+    Slicing to "## Step 1" swept in any section inserted between them, so
+    assertions about Step 0 could be satisfied by unrelated text.
+    """
+    after = text.split("## Step 0", 1)[1]
+    parts = re.split(r"\n## ", after, maxsplit=1)
+    return parts[0]
 SCRIPTS = sorted((ROOT / "scripts").glob("*.py"))
 
 # Imported by the CLIs rather than run: no argparse, no network.
-LIBRARY_MODULES = {"pdf_utils.py", "net_errors.py", "naming.py"}
+LIBRARY_MODULES = {"pdf_utils.py", "net_errors.py", "naming.py",
+                   "sec_identity.py"}
 # CLIs that never touch the network, so they don't route through net_errors.
 OFFLINE_CLIS = {"identify_venue.py", "update_skill.py", "sync_project_skill.py"}
 
@@ -105,13 +117,13 @@ class SkillDefinitionTest(unittest.TestCase):
         # The shell's cwd is the user's project, not the skill, so a bare
         # "python scripts/..." silently does nothing -- or runs the
         # project's own scripts/ file.
-        step0 = self.text.split("## Step 0", 1)[1].split("## Step 1", 1)[0]
+        step0 = step_zero(self.text)
         self.assertIn("relative to the skill's own directory", step0)
         self.assertIn("<skill-dir>/scripts/update_skill.py", step0)
 
     def test_step_zero_tells_the_model_to_self_update_and_re_read(self):
         self.assertIn("scripts/update_skill.py", self.text)
-        step0 = self.text.split("## Step 0", 1)[1].split("## Step 1", 1)[0]
+        step0 = step_zero(self.text)
         for expected in ("updated", "up-to-date", "skipped", "Re-read `SKILL.md`"):
             with self.subTest(expected=expected):
                 self.assertIn(expected, step0)
@@ -126,12 +138,29 @@ class SkipReasonDocumentationTest(unittest.TestCase):
         reasons = set(re.findall(r'skip\(\s*\n?\s*"([a-z-]+)"', source))
         reasons |= set(re.findall(r'report\.add\("reason", "([a-z-]+)"\)', source))
         self.assertTrue(reasons)
-        step0 = (SKILL_MD.read_text(encoding="utf-8")
-                 .split("## Step 0", 1)[1].split("## Step 1", 1)[0])
+        step0 = step_zero(SKILL_MD.read_text(encoding="utf-8"))
         missing = sorted(r for r in reasons if r not in step0)
         self.assertEqual(missing, [],
                          f"update_skill.py can emit reasons SKILL.md never "
                          f"mentions: {missing}")
+
+
+class SecContactDocumentationTest(unittest.TestCase):
+    def test_the_contact_requirement_is_documented_before_retrieval(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        contact = text.index("SEC filings need a contact address")
+        self.assertLess(text.index("## Step 1"), contact,
+                        "venue identification is offline and needs no contact")
+        self.assertLess(contact, text.index("## Step 2"),
+                        "the contact is needed before the first SEC request")
+
+    def test_it_tells_the_model_to_ask_rather_than_invent(self):
+        section = SKILL_MD.read_text(encoding="utf-8").split(
+            "SEC filings need a contact address", 1)[1].split("\n## ", 1)[0]
+        for expected in ("Ask the user", "sec_user_agent.txt", "SEC_USER_AGENT",
+                         "never reuse an address"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, section)
 
 
 class ScriptHealthTest(unittest.TestCase):

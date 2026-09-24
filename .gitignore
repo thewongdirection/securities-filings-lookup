@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 filings/
 save_location.txt
+sec_user_agent.txt

@@ -52,6 +52,13 @@ Two consequences worth knowing:
 ## Prerequisites
 
 - **Claude Code (or Claude Desktop)** with real network access — the scripts talk directly to `sec.gov` / `data.sec.gov`, `cninfo.com.cn`, and `hkexnews.hk`. In claude.ai's sandbox those hosts are unreachable, so there the skill degrades gracefully to venue identification and direct links (no PDF downloads).
+- **A contact address for SEC** — SEC's fair-access policy requires it, and its edge returns `403` for a `User-Agent` without an email address (a project URL alone is not enough; verified live). Set it once:
+  ```bash
+  export SEC_USER_AGENT='<Your Name> <you@your-provider.com>'   # this shell
+  # remembered across sessions (gitignored) -- next to SKILL.md, not your cwd:
+  echo '<Your Name> <you@your-provider.com>' > ~/.claude/skills/securities-filings-lookup/sec_user_agent.txt
+  ```
+  Any single run can also pass `--user-agent`. Until one of those is set, the US scripts refuse to send a request and print how to fix it — they never substitute a made-up address. The other six venues need no contact.
 - **Python 3.10+** on PATH. Lookups and Hong Kong / China PDF saves use only the standard library.
 - **For saving US SEC filings as PDFs** (one-time setup, the skill will prompt/do it when first needed):
   ```
@@ -156,6 +163,10 @@ What you get back: the company resolved to its official identifier (CIK / stock 
 - **Exhibits that carry the annual report come too** — some filers (IBM is the standard case) file a thin 10-K that incorporates the MD&A and financial statements from `EX-13` by reference, so saving only the primary document hands back a wrapper with no financials. The US fetcher reads the filing index and saves any EX-13 alongside it (`--exhibits` to widen, `--no-exhibits` to turn off).
 - **Original documents only, never reconstructions**: HK/China PDFs are saved byte-for-byte; SEC HTML is rendered by a real browser (same output as Chrome's Print → Save as PDF). If a faithful copy can't be produced, you get the direct URL instead.
 - **Polite to regulators**: results already fetched in the conversation aren't re-fetched; the SEC ticker→CIK mapping is cached locally for a day; HTTP 429 rate limits are reported plainly rather than retried in a loop. Heavy use (many tickers in a day) can still get your IP temporarily rate limited by SEC — the skill will tell you if that happens.
+
+## Where your SEC contact is stored
+
+`sec_user_agent.txt` next to `SKILL.md`, one line, created when you set it and **gitignored** — your address never syncs through this repo. This repo carries the skill twice (the root, and the `.claude/skills/` mirror a cloud session loads), so the mirror also reads the file at the repo root: configure it once, either copy finds it. `$SEC_USER_AGENT` overrides the file for a shell, and `--user-agent` overrides both for a single run. The skill asks you for the address rather than picking one, because SEC receives it with every request.
 
 ## Where downloaded files are saved
 

@@ -38,3 +38,26 @@ Many FTSE issuers are cross-listed: US ADRs with SEC filings (AZN, HSBA=HSBC, BP
 ## Fallback
 
 Browse the NSM portal manually or `web_search "<company> annual report NSM"`. In claude.ai's sandbox the API host isn't reachable — hand over the portal URL.
+
+## The NSM search index this script queries is retired (2026-09)
+
+`POST https://api.data.fca.org.uk/search?index=fca-nsm-searchdata` now
+answers `400 Invalid index` for every query. Confirmed against ten issuers
+(AstraZeneca, HSBC, Shell, Unilever, BP, GSK, Diageo, Rio Tinto, Barclays,
+Vodafone) -- all ten, so it is the endpoint rather than any one company.
+`fca-nsm-searchdata-v2`, `fca-nsm`, `nsm-searchdata`, `fca-nsm-search`,
+`fca-nsmsearchdata` and `fca-nsm-searchdata-prod` are all rejected the same
+way, and the portal's published bundle no longer contains the API base or
+index name, so the replacement could not be recovered from the client.
+
+`fetch_uk_filings.py` now reports this as an upstream change rather than a
+network problem. Until the new endpoint is identified, use:
+
+- the NSM portal in a browser: https://data.fca.org.uk/#/nsm/nationalstoragemechanism
+- the issuer's own IR page (RNS announcements and the annual report PDF)
+- the issuer's US filings where it has an ADR (Shell, BP, AstraZeneca and
+  others file 20-F with SEC -- that route works today)
+
+Fixing the script properly needs the index name the portal now calls,
+which is best read from a browser's network panel on a live NSM search.
+

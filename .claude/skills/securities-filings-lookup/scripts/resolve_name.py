@@ -32,6 +32,7 @@ import ssl
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -186,10 +187,16 @@ def search_jp(q: str) -> list[tuple[str, str, str]]:
 def search_uk(q: str) -> list[tuple[str, str, str]]:
     body = {"from": 0, "size": 40, "sort": "publication_date", "sortorder": "desc",
             "keyword": q, "criteriaObj": {"criteria": [], "dateCriteria": []}}
+    # The endpoint and the meaning of a 400 from it are defined once, in
+    # fetch_uk_filings, so the next FCA change is a single edit.
+    from fetch_uk_filings import RETIRED_INDEX_NOTE, SEARCH_URL
     try:
-        raw = _post("https://api.data.fca.org.uk/search?index=fca-nsm-searchdata",
-                    json.dumps(body).encode(), "application/json")
+        raw = _post(SEARCH_URL, json.dumps(body).encode(), "application/json")
         hits = json.loads(raw.decode()).get("hits", {}).get("hits", [])
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            return [("uk", "ERROR", RETIRED_INDEX_NOTE)]
+        return [("uk", "ERROR", str(e))]
     except Exception as e:
         return [("uk", "ERROR", str(e))]
     seen, out = set(), []

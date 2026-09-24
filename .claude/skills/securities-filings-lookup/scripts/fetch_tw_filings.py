@@ -35,7 +35,7 @@ import urllib.parse
 import urllib.request
 
 from pdf_utils import save_pdf_bytes
-from net_errors import run
+from net_errors import HostRefused, run
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -55,7 +55,48 @@ def _context() -> ssl.SSLContext:
 CTX = _context()
 
 
-def _post(payload: dict) -> bytes:
+# TWSE serves a refusal as HTTP 200, so the status code says nothing. The
+# English sentence and the Chinese line above it are separate markers: a
+# Chinese-only variant would otherwise read as "no filings found" again.
+# Taken from the recorded refusal (tests/fixtures/twse_blocked.html): the
+# English sentence and the Chinese line, which reads 無法呈現 -- not the
+# 無法瀏覽 a guess would use.
+BLOCK_MARKERS = ("CAN NOT BE ACCESSED", "無法呈現", "為安全性考量")
+
+
+def _decode(body: bytes, content_type: str = "") -> str:
+    """Text of a TWSE response, honouring the charset it declares.
+
+    Listings come back Big5 and the block page is UTF-8, so decoding
+    everything as Big5 turned that message into mojibake -- which is how
+    it went unnoticed as "no filings found". email.message does the
+    header parsing (quoted forms included); Big5 is the server's default.
+    """
+    from email.message import Message
+
+    message = Message()
+    message["Content-Type"] = content_type or "text/html"
+    charset = message.get_content_charset("big5")
+    try:
+        return body.decode(charset, errors="replace")
+    except LookupError:
+        return body.decode("big5", errors="replace")
+
+
+def _check_not_blocked(text: str) -> None:
+    upper = text.upper()
+    if any(marker.upper() in upper for marker in BLOCK_MARKERS):
+        raise HostRefused(
+            "TWSE's document server refused this request: it answered HTTP 200 "
+            "with its \"FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED\" "
+            "page. That is doc.twse.com.tw declining the client -- typically a "
+            "datacentre or cloud IP -- not an absence of filings, and headers, "
+            "a referer and a session cookie make no difference. Use MOPS in a "
+            "browser instead: https://mops.twse.com.tw (English: e-Search > "
+            "annual reports), or run the skill from a network TWSE accepts.")
+
+
+def _post(payload: dict) -> str:
     req = urllib.request.Request(
         URL,
         data=urllib.parse.urlencode(payload).encode(),
@@ -63,7 +104,9 @@ def _post(payload: dict) -> bytes:
                  "Content-Type": "application/x-www-form-urlencoded"},
     )
     with urllib.request.urlopen(req, timeout=30, context=CTX) as resp:
-        return resp.read()
+        text = _decode(resp.read(), resp.headers.get("Content-Type", ""))
+    _check_not_blocked(text)
+    return text
 
 
 def list_files(co_id: str, fiscal_year: int, kind: str) -> list[tuple[str, str, str]]:
@@ -74,21 +117,33 @@ def list_files(co_id: str, fiscal_year: int, kind: str) -> list[tuple[str, str, 
     if kind == "financial":
         payload.update({"mtype": "A", "dtype": "",
                         "year": str(fiscal_year - 1911)})  # financial reports carry their own year
-    body = _post(payload).decode("big5", errors="replace")
+    body = _post(payload)
     return re.findall(r'readfile2?\("(\w)","(\d+)","([^"]+)"\)', body)
 
 
 def download(kind_char: str, co_id: str, filename: str) -> bytes:
     """The two-step flow: step=9 returns a page with a temporary link."""
     body = _post({"step": "9", "kind": kind_char, "co_id": co_id,
-                  "filename": filename}).decode("big5", errors="replace")
+                  "filename": filename})
     m = re.search(r"href='(/pdf/[^']+)'", body)
     if not m:
         raise RuntimeError(f"no temporary link in step-9 response for {filename}")
     req = urllib.request.Request("https://doc.twse.com.tw" + m.group(1),
                                  headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=120, context=CTX) as resp:
-        return resp.read()
+        data = resp.read()
+        content_type = resp.headers.get("Content-Type", "")
+    if data[:5] != b"%PDF-":
+        # A refusal here arrives as HTTP 200 HTML exactly as it does for the
+        # listing; writing it to a .pdf would hand back an error page as the
+        # annual report.
+        _check_not_blocked(_decode(data, content_type))
+        raise HostRefused(
+            f"TWSE returned {len(data)} bytes that are not a PDF for "
+            f"{filename} (Content-Type: {content_type or 'unknown'}). The "
+            "temporary download link may have expired -- re-run the listing "
+            "step -- or the server declined this client. Nothing was saved.")
+    return data
 
 
 def main() -> None:
@@ -117,14 +172,10 @@ def main() -> None:
             print(f"FY{fiscal}  {filename}")
             continue
         os.makedirs(args.save_dir, exist_ok=True)
+        # download() raises unless the bytes really are a PDF, so there is
+        # no non-PDF branch here to write an error page to a .pdf path.
         data = download(kind_char, co_id, filename)
-        out = os.path.join(args.save_dir, filename)
-        if data[:5] == b"%PDF-":
-            saved = save_pdf_bytes(data, out)
-        else:
-            with open(out, "wb") as f:
-                f.write(data)
-            saved = out
+        saved = save_pdf_bytes(data, os.path.join(args.save_dir, filename))
         print(f"FY{fiscal}  {filename}  -> {saved}")
 
 

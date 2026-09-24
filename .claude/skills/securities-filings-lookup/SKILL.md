@@ -73,7 +73,7 @@ python scripts/resolve_name.py "Tencent"
 python scripts/resolve_name.py "TSMC" --venues us,tw
 ```
 
-It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM, JPX's English company list for Japan) and prints candidates as `venue code name`. Germany has no public directory — resolve German names by web search. Then:
+It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM, JPX's English company list for Japan) and prints candidates as `venue code name`. A venue that cannot answer returns an `ERROR` row and the others still report — the UK row currently always errors, because the FCA retired that search index. Germany has no public directory — resolve German names by web search. Then:
 
 - **Confirm with the user before proceeding** (AskUserQuestion where available): list the plausible candidates with the closest match first and marked as the default. **If no answer arrives within ~15 seconds** or the session is non-interactive, **proceed with the closest match** — say so in the question and in your reply.
 - Filter obvious noise before asking: HK results include listed *notes/bonds* (names like "TENCENT N2801") — the plain equity is the short bare name; UK results may lack a symbol.
@@ -118,8 +118,8 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 | United States | `references/us-edgar.md` | `scripts/fetch_us_filings.py` |
 | Hong Kong | `references/hong-kong.md` | — (search/browse workflow; no clean public API) |
 | Mainland China A-shares | `references/china-a-shares.md` | `scripts/fetch_cn_filings.py` |
-| Taiwan | `references/taiwan.md` | `scripts/fetch_tw_filings.py` |
-| London | `references/london.md` | `scripts/fetch_uk_filings.py` |
+| Taiwan | `references/taiwan.md` | `scripts/fetch_tw_filings.py` — TWSE refuses datacentre IPs with an HTTP-200 block page; the script says so rather than reporting "no filings" |
+| London | `references/london.md` | `scripts/fetch_uk_filings.py` — **the FCA's NSM search index is retired (2026-09); the script reports that and the manual route**, see `references/london.md` |
 | Japan | `references/japan.md` | `scripts/fetch_jp_filings.py` (TDnet) |
 | Frankfurt / Germany | `references/frankfurt.md` | — (browse/IR workflow; official sources aren't scriptable) |
 

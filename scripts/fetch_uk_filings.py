@@ -34,11 +34,12 @@ import json
 import os
 import ssl
 import sys
+import urllib.error
 import urllib.request
 
 from naming import filing_name
 from pdf_utils import save_pdf_bytes
-from net_errors import run
+from net_errors import HostRefused, run
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -59,6 +60,29 @@ def _context() -> ssl.SSLContext:
 CTX = _context()
 
 
+RETIRED_INDEX_NOTE = (
+    "the FCA's NSM search index is retired -- see references/london.md; use "
+    "the NSM portal in a browser: "
+    "https://data.fca.org.uk/#/nsm/nationalstoragemechanism")
+
+
+def retired_index_error(exc: urllib.error.HTTPError) -> HostRefused:
+    """The one explanation of a 400 from the NSM search endpoint.
+
+    resolve_name.py reports the same condition, so the wording lives here
+    rather than in two places that can disagree.
+    """
+    try:
+        detail = exc.read().decode("utf-8", errors="replace")[:200].strip()
+    except Exception:
+        detail = ""
+    return HostRefused(
+        "The FCA's NSM search API no longer accepts the index this script "
+        f"queries: it answered 400 '{detail or exc.reason}' for {SEARCH_URL}. "
+        f"That is an upstream change, not a network problem -- {RETIRED_INDEX_NOTE}"
+        ", or the issuer's own IR/RNS page.")
+
+
 def search(keyword: str, max_scan: int = 500) -> list[dict]:
     """Page through results -- heavy filers (banks with structured-note
     programmes) can bury the equity annual report hundreds of rows deep."""
@@ -71,8 +95,20 @@ def search(keyword: str, max_scan: int = 500) -> list[dict]:
         req = urllib.request.Request(
             SEARCH_URL, data=json.dumps(body).encode(),
             headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=30, context=CTX) as resp:
-            j = json.loads(resp.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=30, context=CTX) as resp:
+                j = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            # A 400 on the very first page is the endpoint refusing the
+            # query outright. A 400 partway through paging is something
+            # else (a request-validation change, a WAF), and the hits
+            # already collected are still worth returning.
+            if exc.code == 400 and start == 0:
+                raise retired_index_error(exc) from exc
+            if out:
+                print(f"    (stopped paging after {len(out)} results: {exc})")
+                break
+            raise
         hits = [h["_source"] for h in j.get("hits", {}).get("hits", [])]
         out.extend(hits)
         if len(hits) < page:

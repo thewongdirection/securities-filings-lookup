@@ -198,7 +198,9 @@ class ScriptHealthTest(unittest.TestCase):
                 continue
             with self.subTest(script=script.name):
                 text = script.read_text(encoding="utf-8")
-                self.assertIn("from net_errors import run", text)
+                # Several scripts also import HostRefused; the import must
+                # still be a single line in the module's import block.
+                self.assertRegex(text, r"(?m)^from net_errors import .*\brun\b")
                 self.assertIn("run(main)", text)
 
     def test_no_hardcoded_credentials_in_the_scripts(self):

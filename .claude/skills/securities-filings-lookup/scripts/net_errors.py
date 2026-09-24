@@ -29,6 +29,16 @@ FALLBACK = ("Fall back to web search + web fetch for this venue (see the "
             "environment note in SKILL.md), or hand the user the direct URL.")
 
 
+class HostRefused(RuntimeError):
+    """The host answered, and the answer was a refusal.
+
+    Some venues serve a block page with HTTP 200 rather than a 4xx, so
+    nothing in the status code says the request failed. Reported like a
+    setup problem -- one plain line, no traceback -- because the message
+    is written for the reader.
+    """
+
+
 class SetupError(RuntimeError):
     """Something about the environment needs fixing, and the message says how.
 
@@ -152,7 +162,7 @@ def run(main) -> None:
         # one clause covers HTTP status errors, DNS, TLS and proxy refusals.
         print(explain(exc), file=sys.stderr)
         sys.exit(1)
-    except SetupError as exc:
+    except (SetupError, HostRefused) as exc:
         # The message is written for the reader and says how to fix it.
         # Any other RuntimeError is a bug or a source-format change and
         # keeps its traceback, which is what makes it debuggable.

@@ -31,12 +31,13 @@ import re
 import time
 import gzip
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import sec_identity
 from naming import claim_name, filing_name
 from pdf_utils import save_filing_as_pdf
-from net_errors import run
+from net_errors import HostRefused, run
 
 # SEC's fair-access policy wants every request to declare a real
 # contact, so the User-Agent is configuration, not a constant:
@@ -104,7 +105,18 @@ def _get(url: str) -> bytes:
 
 
 def _get_json(url: str) -> dict:
-    return json.loads(_get(url).decode())
+    body = _get(url)
+    try:
+        return json.loads(body.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        # SEC's edge can answer with an HTML block page and status 200; a
+        # JSON decode error reaching the user as a traceback is the thing
+        # net_errors exists to prevent.
+        raise HostRefused(
+            f"{url} answered with {len(body)} bytes that are not JSON: "
+            f"{body[:80]!r}. That is usually SEC's edge refusing an "
+            "automated client -- check the User-Agent contact (see "
+            "scripts/sec_identity.py) and wait before retrying.") from exc
 
 
 def resolve_cik(ticker: str) -> tuple[int, str]:
@@ -159,25 +171,134 @@ def resolve_cik(ticker: str) -> tuple[int, str]:
     )
 
 
-def fetch_filings(cik: int, forms: list[str] | None, limit: int) -> list[dict]:
+# submissions.json carries only a recent window inline; heavy filers push
+# their annual report out of it, and the rest arrives in separately named
+# JSON pages listed under filings.files.
+OLDER_PAGES_URL = "https://data.sec.gov/submissions/{name}"
+MAX_OLDER_PAGES = 3
+
+
+
+def fetch_filings(cik: int, forms: list[str] | None,
+                  limit: int) -> tuple[list[dict], dict, str]:
+    """(rows, submissions payload, note).
+
+    The payload comes back so a caller can describe a miss without asking
+    SEC for the same JSON twice, and `note` carries anything that makes
+    the answer incomplete -- an older page that could not be read -- so a
+    partial scan is never reported as a finished one.
+    """
     time.sleep(0.15)  # stay well under the 10 req/sec fair-access limit
     data = _get_json(SUBMISSIONS_URL.format(cik=cik))
-    recent = data["filings"]["recent"]
-    n = len(recent["form"])
-    periods = recent.get("reportDate", [None] * n)
-    descriptions = recent.get("primaryDocDescription", [""] * n)
+    note = ""
+    rows = _rows_from(data["filings"]["recent"], cik, forms, limit)
+
+    # Only reach for the older pages when the window did not satisfy the
+    # request: for most filers this costs nothing.
+    pages = data["filings"].get("files") or []
+    for page in pages[:MAX_OLDER_PAGES]:
+        if len(rows) >= limit:
+            break
+        name = page.get("name")
+        if not name:
+            continue
+        time.sleep(0.15)
+        try:
+            older = _get_json(OLDER_PAGES_URL.format(name=name))
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            # A rate limit is the whole IP, so pressing on only deepens it.
+            # Anything else leaves the window as a usable partial answer --
+            # but the caller has to know the scan did not finish, or a
+            # transient 500 gets reported as "this company has no 10-K".
+            _reraise_if_fatal(exc)
+            note = (f"An older filing page ({name}) could not be read "
+                    f"({exc}), so this list may be incomplete.")
+            break
+        rows.extend(_rows_from(older, cik, forms, limit - len(rows)))
+    return rows[:limit], data, note
+
+
+# Corporate suffixes carry no search value, and browse-edgar matches from
+# the start of the company name.
+NAME_SUFFIXES = ("inc", "inc.", "corp", "corp.", "corporation", "co", "co.",
+                 "company", "holdings", "holding", "plc", "ltd", "ltd.",
+                 "limited", "group", "lp", "llc", "sa", "nv", "ag", "the")
+
+
+def search_name(name: str) -> str:
+    """The part of a company name worth searching EDGAR with.
+
+    Verified against browse-edgar: `company=ExxonMobil Holdings Corp` and
+    `company=ExxonMobil` both return "No matching companies", while the
+    shortened `company=Exxon` finds EXXON MOBIL CORP -- the match is from
+    the start of the name, so the fewer words the better.
+    """
+    words = [w for w in re.split(r"[\s,]+", name or "") if w]
+    kept = [w for w in words if w.lower().strip(".") not in NAME_SUFFIXES]
+    first = (kept or words or [name])[0]
+    # A successor often concatenates the old name: "ExxonMobil Holdings Corp"
+    # for what EDGAR still lists as "EXXON MOBIL CORP". Cutting the
+    # camel-case token at its second capital gives "Exxon", which matches.
+    camel = re.match(r"^([A-Z][a-z]+)(?=[A-Z][a-z])", first)
+    return camel.group(1) if camel else first
+
+
+def predecessor_searches(name: str, form: str) -> list[tuple[str, str]]:
+    """Places to look for the filings a successor CIK does not have."""
+    stem = search_name(name)
+    return [
+        ("EDGAR full-text search",
+         "https://www.sec.gov/edgar/search/#/q=" + urllib.parse.quote(f'"{name}"')
+         + f"&forms={urllib.parse.quote(form)}"),
+        (f"EDGAR company search for '{stem}'",
+         "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+         f"&company={urllib.parse.quote(stem)}&type={urllib.parse.quote(form)}"),
+    ]
+
+
+def summarize_entity(data: dict) -> str:
+    """One line on what this CIK holds, for a no-match report.
+
+    Takes the submissions payload the caller already fetched -- a second
+    identical GET on the path where a rate limit is likeliest is exactly
+    what not to do -- and is careful to describe the inline window as a
+    window when older pages exist.
+    """
+    filings = (data or {}).get("filings") or {}
+    recent = filings.get("recent") or {}
+    dates = recent.get("filingDate") or []
+    if not dates:
+        return "This CIK has no filings on record at all."
+    kinds = sorted(set(recent.get("form") or []))
+    forms = ", ".join(kinds[:12]) + (", ..." if len(kinds) > 12 else "")
+    older = filings.get("files") or []
+    if older:
+        total = len(dates) + sum(int(p.get("filingCount") or 0) for p in older)
+        earliest = min([p.get("filingFrom") or dates[-1] for p in older] + [dates[-1]])
+        return (f"This CIK has about {total} filings on record from {earliest} "
+                f"to {dates[0]}; the most recent {len(dates)} are of these "
+                f"forms: {forms}.")
+    return (f"This CIK has {len(dates)} filings on record from {dates[-1]} to "
+            f"{dates[0]}, of these forms: {forms}.")
+
+
+def _rows_from(block: dict, cik: int, forms: list[str] | None,
+               limit: int) -> list[dict]:
+    n = len(block.get("form") or [])
+    periods = block.get("reportDate", [None] * n)
+    descriptions = block.get("primaryDocDescription", [""] * n)
 
     rows = []
     for i in range(n):
-        form = recent["form"][i]
+        form = block["form"][i]
         if forms and form not in forms:
             continue
-        accession_dashed = recent["accessionNumber"][i]
+        accession_dashed = block["accessionNumber"][i]
         accession = accession_dashed.replace("-", "")
-        doc = recent["primaryDocument"][i]
+        doc = block["primaryDocument"][i]
         rows.append({
             "form": form,
-            "filed": recent["filingDate"][i],
+            "filed": block["filingDate"][i],
             "period": periods[i],
             "description": descriptions[i],
             "cik": cik,
@@ -395,9 +516,26 @@ def main() -> None:
     cik, name = resolve_cik(args.ticker)
     print(f"{name} (CIK {cik:010d})\n")
 
-    rows = fetch_filings(cik, forms, args.limit)
+    rows, submissions, note = fetch_filings(cik, forms, args.limit)
+    if note:
+        print(f"note: {note}\n")
     if not rows:
-        print("No matching filings found.")
+        wanted = "/".join(forms) if forms else "any form"
+        print(f"No {wanted} filings found for {args.ticker} under CIK "
+              f"{cik:010d}.")
+        print(f"  {summarize_entity(submissions)}")
+        pages = ((submissions.get("filings") or {}).get("files") or [])
+        if len(pages) > MAX_OLDER_PAGES:
+            print(f"  Only the most recent {MAX_OLDER_PAGES} of {len(pages)} "
+                  "older filing pages were searched, so an older match may "
+                  "exist -- narrow with --forms or search EDGAR directly.")
+        form = forms[0] if forms else "10-K"
+        print("  A ticker can also point at a successor entity -- after a "
+              "holding-company reorganisation the new CIK carries the ticker "
+              "while the operating company's annual reports stay under the "
+              "old one (XOM did exactly this in 2026).")
+        for label, url in predecessor_searches(name, form):
+            print(f"  {label}: {url}")
         return
 
     if args.save_dir:

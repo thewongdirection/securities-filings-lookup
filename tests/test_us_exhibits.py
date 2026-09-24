@@ -430,7 +430,7 @@ class RowMetadataTest(unittest.TestCase):
     def test_rows_carry_cik_and_both_accession_forms(self):
         with mock.patch.object(us, "_get_json", return_value=self.SUBMISSIONS), \
                 mock.patch.object(us.time, "sleep"):
-            row = us.fetch_filings(51143, ["10-K"], 1)[0]
+            row = us.fetch_filings(51143, ["10-K"], 1)[0][0]
         self.assertEqual(row["cik"], 51143)
         self.assertEqual(row["accession"], "000005114326000010")
         self.assertEqual(row["accession_dashed"], "0000051143-26-000010")

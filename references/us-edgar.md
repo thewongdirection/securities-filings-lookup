@@ -88,3 +88,26 @@ while the 216-page annual report is the primary document. A foreign
 private issuer's 20-F is self-contained, so `fetch_us_filings.py` reads
 the index for 10-K, 10-K405 and 10-KSB only, and skips any exhibit whose
 filename or description marks it a certification.
+
+## A ticker can point at a successor entity with no annual report yet
+
+`company_tickers.json` maps a ticker to whichever CIK currently carries
+it, and after a holding-company reorganisation that is the new entity.
+Live example (2026-09): **XOM** resolves to `ExxonMobil Holdings Corp`,
+CIK 2115436, whose record starts 2026-07-01 and holds 10-Q, 8-K, 8-K12B,
+424B3, FWP, POSASR and S-8 POS -- no 10-K, because it has not filed a
+first annual report yet. The 10-Ks are under the predecessor,
+`EXXON MOBIL CORP` CIK 34088 (latest 2026-02-18), which no longer carries
+any ticker.
+
+So "no 10-K found" can be true of the CIK and false of the company.
+`fetch_us_filings.py` now reports the entity's filing window and form
+types alongside the miss, and points at EDGAR's company search by name.
+The tell is a CIK whose earliest filing is recent and whose forms include
+`8-K12B` (a successor registering securities).
+
+Separately, `submissions.json` inlines only a recent window of filings
+and lists the rest under `filings.files`; the script follows up to three
+of those pages when the window does not satisfy the request, so a heavy
+filer's annual report is still found.
+

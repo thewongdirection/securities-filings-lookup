@@ -35,3 +35,23 @@ The 年報 (shareholder-meeting annual report, dtype F04) is Chinese. Large expo
 ## Fallback
 
 If the endpoint changes or errors, browse MOPS manually: `https://mops.twse.com.tw` → 電子書 → 年報, or `web_search "<company> MOPS annual report"`. In claude.ai's sandbox neither host is reachable — hand over URLs.
+
+## TWSE refuses some clients with HTTP 200
+
+`doc.twse.com.tw` answers a request it declines with **status 200** and a
+page reading "FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED" (UTF-8,
+even though listings come back Big5). Nothing in the status code says the
+request failed, so the old code decoded it as Big5 into mojibake, found no
+`readfile2(...)` links, and reported "No annual filings found for 2330" --
+pointing the reader at a stock code that was never the problem.
+
+Measured 2026-09 from a cloud container: every one of ten major issuers
+(2330, 2317, 2454, 2412, 2308, 2882, 1301, 2881, 3008, 2303) came back
+blocked, and adding a browser User-Agent, a `Referer`, or a session cookie
+from the search form changed nothing. It is the client IP -- datacentre
+ranges appear to be refused wholesale. `fetch_tw_filings.py` now detects
+the page and says so; do not retry it or try to route around it. The
+working routes are MOPS in a browser
+(https://mops.twse.com.tw, English: e-Search > annual reports), the
+issuer's own IR site, or running the skill from a network TWSE accepts.
+

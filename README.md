@@ -201,9 +201,22 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 ## Development
 
 ```bash
-python -m unittest discover -s tests      # run every regression test
+python -m unittest discover -s tests      # every offline regression test
 python scripts/sync_project_skill.py      # after editing SKILL.md / scripts / references
+
+# all seven markets against the live regulators, 10 issuers sampled per market
+SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live -v
+SKILL_LIVE_SEED=7 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live
 ```
+
+`tests/test_markets_live.py` samples ten issuers per venue from a larger pool on
+each run (the sample is printed; `SKILL_LIVE_SEED` makes a run reproducible) and
+asserts what a pass means for that venue: filings returned where the venue
+answers, "the window is empty" stated where TDnet's ~1 month has nothing, and the
+refusal named in its own words where a venue declines this client (TWSE from a
+datacentre IP) or its endpoint has been retired upstream (the FCA's NSM search
+index). No outcome may arrive as a traceback. It is skipped without
+`SKILL_LIVE_TESTS=1`, so the default suite stays offline and deterministic.
 
 The repo root is the canonical skill; `.claude/skills/securities-filings-lookup/` is a generated mirror that lets Claude Code on the web load it as a project skill. `tests/test_skill_layout.py` fails if the two drift, so run the sync script before committing.
 

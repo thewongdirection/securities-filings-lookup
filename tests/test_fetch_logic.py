@@ -34,8 +34,9 @@ import save_filing  # noqa: E402
 class FakeResponse(io.BytesIO):
     """Minimal stand-in for urlopen's context manager."""
 
-    def __init__(self, payload: bytes):
+    def __init__(self, payload: bytes, content_type: str = "application/json"):
         super().__init__(payload)
+        self.headers = {"Content-Type": content_type}
 
     def __enter__(self):
         return self
@@ -67,7 +68,7 @@ SUBMISSIONS = {
 class UsFilingSelectionTest(unittest.TestCase):
     def _rows(self, forms, limit):
         with mock.patch.object(fetch_us_filings, "_get_json", return_value=SUBMISSIONS):
-            return fetch_us_filings.fetch_filings(789019, forms, limit)
+            return fetch_us_filings.fetch_filings(789019, forms, limit)[0]
 
     def test_form_filter_keeps_only_the_requested_type(self):
         rows = self._rows(["10-Q"], 10)
@@ -144,8 +145,9 @@ class TwFilingSelectionTest(unittest.TestCase):
         captured = {}
 
         def fake_post(payload):
+            # _post decodes and block-checks internally, so it hands back text.
             captured.update(payload)
-            return TW_LISTING.encode("big5", errors="replace")
+            return TW_LISTING
 
         with mock.patch.object(fetch_tw_filings, "_post", fake_post):
             files = fetch_tw_filings.list_files("2330", 2025, "annual")
@@ -161,7 +163,7 @@ class TwFilingSelectionTest(unittest.TestCase):
 
         def fake_post(payload):
             captured.update(payload)
-            return b""
+            return ""
 
         with mock.patch.object(fetch_tw_filings, "_post", fake_post):
             fetch_tw_filings.list_files("2330", 2025, "financial")

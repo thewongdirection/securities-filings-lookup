@@ -42,11 +42,10 @@ import json
 import os
 import re
 import sys
-import tempfile
-import time
 import urllib.parse
 import urllib.request
 
+import disk_cache
 from naming import claim_name, filing_name
 from net_errors import HostRefused, SetupError, run
 from pdf_utils import save_filing_as_pdf
@@ -111,10 +110,10 @@ def load_directory(refresh: bool = False) -> list[dict]:
     ~1,330 rows at the time of writing, so re-downloading it per lookup is
     both slow and rude; the SEC fetcher caches its ticker map the same way.
     """
-    cache = os.path.join(tempfile.gettempdir(), CACHE_NAME)
+    cache = disk_cache.cache_path(CACHE_NAME)
     if not refresh:
         try:
-            if time.time() - os.path.getmtime(cache) < CACHE_TTL_SECONDS:
+            if disk_cache.is_fresh(cache, CACHE_TTL_SECONDS):
                 with open(cache, encoding="utf-8") as fh:
                     return parse_directory(json.load(fh))
         except (OSError, ValueError):
@@ -128,11 +127,7 @@ def load_directory(refresh: bool = False) -> list[dict]:
             f"JSON: {raw[:80]!r}. SGX's edge may be refusing this client -- "
             "browse https://www.sgx.com/securities/company-announcements "
             "instead.") from exc
-    try:
-        with open(cache, "wb") as fh:
-            fh.write(raw)
-    except OSError:
-        pass
+    disk_cache.store(cache, raw)
     return parse_directory(payload)
 
 

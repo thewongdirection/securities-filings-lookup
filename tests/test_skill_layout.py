@@ -40,7 +40,7 @@ SCRIPTS = sorted((ROOT / "scripts").glob("*.py"))
 
 # Imported by the CLIs rather than run: no argparse, no network.
 LIBRARY_MODULES = {"pdf_utils.py", "net_errors.py", "naming.py",
-                   "sec_identity.py"}
+                   "sec_identity.py", "disk_cache.py"}
 # CLIs that never touch the network, so they don't route through net_errors.
 OFFLINE_CLIS = {"identify_venue.py", "update_skill.py", "sync_project_skill.py"}
 

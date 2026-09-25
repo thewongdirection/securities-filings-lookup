@@ -34,6 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import disk_cache
 import sec_identity
 from naming import claim_name, filing_name
 from pdf_utils import save_filing_as_pdf
@@ -124,12 +125,11 @@ def resolve_cik(ticker: str) -> tuple[int, str]:
     # re-downloading it every invocation both wastes time and trips
     # SEC's rate limiting (observed live as HTTP 429) after repeated
     # runs. Cache it for a day.
-    import tempfile
-    cache = os.path.join(tempfile.gettempdir(), "sec_company_tickers.json")
+    cache = disk_cache.cache_path("sec_company_tickers.json")
 
     def _load_cache() -> dict | None:
         try:
-            if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 86400:
+            if disk_cache.is_fresh(cache):
                 with open(cache, encoding="utf-8") as f:
                     return json.load(f)
         except (OSError, json.JSONDecodeError):
@@ -139,11 +139,7 @@ def resolve_cik(ticker: str) -> tuple[int, str]:
     def _refresh() -> dict:
         raw = _get(TICKERS_URL)
         data = json.loads(raw.decode())
-        try:
-            with open(cache, "wb") as f:
-                f.write(raw)
-        except OSError:
-            pass
+        disk_cache.store(cache, raw)
         return data
 
     def _lookup(data: dict, ticker: str):

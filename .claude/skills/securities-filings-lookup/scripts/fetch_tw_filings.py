@@ -83,17 +83,32 @@ def _decode(body: bytes, content_type: str = "") -> str:
         return body.decode("big5", errors="replace")
 
 
-def _check_not_blocked(text: str) -> None:
+def is_blocked(text: str) -> bool:
+    """Is this TWSE's refusal page rather than a real response?"""
     upper = text.upper()
-    if any(marker.upper() in upper for marker in BLOCK_MARKERS):
-        raise HostRefused(
-            "TWSE's document server refused this request: it answered HTTP 200 "
-            "with its \"FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED\" "
-            "page. That is doc.twse.com.tw declining the client -- typically a "
-            "datacentre or cloud IP -- not an absence of filings, and headers, "
-            "a referer and a session cookie make no difference. Use MOPS in a "
-            "browser instead: https://mops.twse.com.tw (English: e-Search > "
-            "annual reports), or run the skill from a network TWSE accepts.")
+    return any(marker.upper() in upper for marker in BLOCK_MARKERS)
+
+
+def refusal(host: str = "doc.twse.com.tw") -> HostRefused:
+    """The same explanation whichever TWSE host served the block page.
+
+    openapi.twse.com.tw serves it too, so the company directory used for
+    name resolution fails the same way the document server does -- which
+    it used to report as an unreadable-JSON error.
+    """
+    return HostRefused(
+        f"TWSE refused this request: {host} answered HTTP 200 with its "
+        "\"FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED\" page. That "
+        "is TWSE declining the client -- typically a datacentre or cloud IP "
+        "-- not an absence of filings, and headers, a referer and a session "
+        "cookie make no difference. Use MOPS in a browser instead: "
+        "https://mops.twse.com.tw (English: e-Search > annual reports), or "
+        "run the skill from a network TWSE accepts.")
+
+
+def _check_not_blocked(text: str) -> None:
+    if is_blocked(text):
+        raise refusal()
 
 
 def _post(payload: dict) -> str:

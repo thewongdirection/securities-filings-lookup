@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Every supported market, ten randomly chosen issuers each, against the live
-regulators.
+Every supported market, twenty-five randomly chosen issuers each, against
+the live regulators.
 
 Opt-in: these tests talk to SEC, CNINFO, TWSE, TDnet, the FCA and HKEX, so
 they are skipped unless SKILL_LIVE_TESTS=1. The rest of the suite stays
@@ -10,9 +10,12 @@ offline and deterministic.
     SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live -v
     SKILL_LIVE_SEED=7 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live
 
-Ten are sampled from a larger pool per market on each run, so repeated runs
-cover different issuers; the chosen sample is printed, and SKILL_LIVE_SEED
-makes a run reproducible.
+SAMPLE_SIZE are sampled from a larger pool per market on each run, so
+repeated runs cover different issuers; the chosen sample is printed, and
+SKILL_LIVE_SEED makes a run reproducible. Every pool is checked against
+that venue's own directory where one is reachable -- the two that are not
+(Taiwan, which refuses this network, and London, whose index the FCA
+retired) say so where they are defined.
 
 What counts as a pass is per-venue, because "no rows" is a legitimate
 answer in some markets and a bug in others:
@@ -42,37 +45,107 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 LIVE = os.environ.get("SKILL_LIVE_TESTS") == "1"
-SAMPLE_SIZE = 10
+SAMPLE_SIZE = 25
 PER_CALL_TIMEOUT = 240
 
-# Pools to sample from: real, currently-listed issuers per venue.
+# Pools to sample from: real, currently-listed issuers per venue, each
+# checked against that venue's own directory where one is reachable from
+# here. Where it is not, the comment says so rather than implying more
+# confidence than the list has.
+
+# All 50 confirmed present in SEC's company_tickers.json (10,413 tickers).
 US_POOL = ["AAPL", "MSFT", "JNJ", "JPM", "PG", "KO", "DIS", "INTC", "CSCO",
            "PEP", "NVDA", "AMD", "AVGO", "WMT", "HD", "MRK", "ABBV", "CAT",
-           "GE", "BA", "MMM", "UNH", "TXN", "QCOM", "ADBE"]
-# Foreign private issuers: 20-F rather than 10-K.
-US_FPI_POOL = ["TSM", "ARM", "SONY", "TM", "SAP", "SHEL", "BP", "AZN", "NVS",
-               "HSBC"]
+           "GE", "BA", "MMM", "UNH", "TXN", "QCOM", "ADBE", "ORCL", "CRM",
+           "NKE", "MCD", "COST", "LLY", "XOM", "CVX", "BAC", "WFC", "T",
+           "VZ", "PFE", "ABT", "TMO", "ACN", "IBM", "AMGN", "HON", "LOW",
+           "SBUX", "GS", "MS", "BLK", "DE"]
+
+# Foreign private issuers, paired with the annual form each actually files
+# -- confirmed by reading every one's submissions history. The pairing
+# matters: RY and TD file 40-F under the Canadian MJDS, not 20-F, and an
+# assertion that merely tolerated "no 20-F found" passed them while
+# checking nothing at all.
+US_FPI_POOL = [
+    ("TSM", "20-F"), ("ARM", "20-F"), ("SONY", "20-F"), ("TM", "20-F"),
+    ("SAP", "20-F"), ("SHEL", "20-F"), ("BP", "20-F"), ("AZN", "20-F"),
+    ("NVS", "20-F"), ("HSBC", "20-F"), ("BABA", "20-F"), ("UL", "20-F"),
+    ("SNY", "20-F"), ("DEO", "20-F"), ("BTI", "20-F"), ("RIO", "20-F"),
+    ("BHP", "20-F"), ("MUFG", "20-F"), ("SMFG", "20-F"), ("IBN", "20-F"),
+    ("INFY", "20-F"), ("HDB", "20-F"), ("TTE", "20-F"), ("E", "20-F"),
+    ("ING", "20-F"), ("BCS", "20-F"), ("STLA", "20-F"), ("NVO", "20-F"),
+    ("ASML", "20-F"), ("SE", "20-F"), ("PDD", "20-F"), ("JD", "20-F"),
+    ("NIO", "20-F"), ("BIDU", "20-F"), ("LYG", "20-F"),
+    ("RY", "40-F"), ("TD", "40-F"),
+]
+
+# All 34 confirmed to return annual reports from CNINFO.
 CN_POOL = ["600519", "601318", "000858", "600036", "000001", "601899",
            "300750", "688981", "601012", "000333", "600030", "601166",
-           "002594", "600276", "601888", "000651", "600887", "601088"]
+           "002594", "600276", "601888", "000651", "600887", "601088",
+           "600900", "601628", "600028", "601857", "600016", "000002",
+           "600104", "600585", "000725", "002415", "600690", "601988",
+           "601398", "000063", "600050", "603288"]
+
+# NOT verifiable from this network: TWSE serves its HTTP-200 refusal page to
+# datacentre IPs on openapi.twse.com.tw as well as doc.twse.com.tw, so the
+# company directory cannot be read from here. These are long-standing TWSE
+# codes; the Taiwan test skips wholesale when TWSE refuses, so a wrong entry
+# would surface only on a network TWSE accepts.
 TW_POOL = ["2330", "2317", "2454", "2412", "2308", "2882", "1301", "2881",
-           "3008", "2303", "2002", "2891", "3711", "2207", "1216"]
+           "3008", "2303", "2002", "2891", "3711", "2207", "1216", "2886",
+           "2884", "1303", "2885", "2892", "2357", "3045", "2409", "2379",
+           "4938", "2408", "6505", "2801", "2883", "5880", "2887", "1101",
+           "1102", "2105", "9910", "2890", "2618", "2610", "2603", "2609"]
+
+# All 35 confirmed present in JPX's English listed-company directory
+# (4,441 rows), every one on the Prime Market.
 JP_POOL = ["7203", "6758", "9984", "8306", "6861", "7974", "6501", "4063",
-           "9432", "8035", "6902", "4568", "8058", "6367", "7267", "9433"]
+           "9432", "8035", "6902", "4568", "8058", "6367", "7267", "9433",
+           "8316", "8411", "6098", "4502", "6954", "7741", "6273", "6981",
+           "4661", "9020", "9022", "8001", "8031", "2914", "6702", "7751",
+           "6301", "4519", "8766"]
+
+# NOT verifiable from anywhere: the FCA retired the NSM search index, so no
+# directory exists to check these against. They are FTSE-100 constituents,
+# and the London test asserts the retired-index message rather than hits.
 UK_POOL = ["AstraZeneca", "HSBC", "Shell", "Unilever", "BP", "GSK", "Diageo",
            "Rio Tinto", "Barclays", "Vodafone", "Tesco", "BT Group",
-           "Lloyds", "National Grid", "Prudential"]
+           "Lloyds", "National Grid", "Prudential", "Glencore",
+           "Anglo American", "Reckitt", "RELX", "London Stock Exchange",
+           "Legal & General", "Aviva", "Compass Group", "SSE",
+           "Standard Chartered", "Sainsbury", "Rolls-Royce", "BAE Systems",
+           "Imperial Brands", "Associated British Foods", "Schroders",
+           "Smiths Group", "Whitbread", "Next", "Kingfisher"]
+
+# All 34 confirmed to resolve to a stock code through HKEX's own name
+# lookup. Hang Seng Bank was dropped: it no longer resolves, having been
+# taken private by HSBC.
 HK_POOL = ["Tencent", "HSBC", "China Mobile", "AIA", "Alibaba", "Meituan",
            "Hong Kong Exchanges", "ICBC", "Ping An", "CNOOC", "Xiaomi",
-           "JD.com", "Galaxy Entertainment", "Sands China", "Bank of China"]
+           "JD.com", "Galaxy Entertainment", "Sands China", "Bank of China",
+           "China Construction Bank", "PetroChina", "Sinopec", "BYD",
+           "NetEase", "Baidu", "Li Auto", "Kuaishou", "Budweiser",
+           "Sunny Optical", "Geely", "ANTA", "Techtronic", "CK Hutchison",
+           "Swire Pacific", "Henderson Land", "Link REIT", "WH Group",
+           "Lenovo"]
+
 # Singapore samples from the live securities directory rather than a
 # hardcoded list: the directory is the venue's own source of truth, so the
 # sample is always current and never goes stale as issuers delist.
 SG_ANNOUNCEMENT = "U6RBLH1JFNDV1QZT"  # DBS FY2025 annual report, 2 attachments
 
-# Frankfurt has no script: the venue is a browse/IR workflow by design.
+# Frankfurt has no script: the venue is a browse/IR workflow by design, and
+# the test is pure offline classification, so these need only be real XETRA
+# tickers. 1COV.DE and P911.DE also cover codes that start with a digit or
+# mix digits in, which the suffix rule has to handle before any code-shape
+# guess gets a look at them.
 DE_POOL = ["SAP.DE", "SIE.DE", "ALV.DE", "BAS.DE", "BMW.DE", "MBG.DE",
-           "DTE.DE", "BAYN.DE", "DBK.DE", "VOW3.DE", "MUV2.DE", "RWE.DE"]
+           "DTE.DE", "BAYN.DE", "DBK.DE", "VOW3.DE", "MUV2.DE", "RWE.DE",
+           "ADS.DE", "AIR.DE", "BEI.DE", "CON.DE", "1COV.DE", "DHL.DE",
+           "DB1.DE", "EOAN.DE", "FRE.DE", "HEI.DE", "HEN3.DE", "IFX.DE",
+           "MRK.DE", "PAH3.DE", "P911.DE", "QIA.DE", "SHL.DE", "SY1.DE",
+           "VNA.DE", "ZAL.DE"]
 
 
 def sample(pool: list[str], size: int = SAMPLE_SIZE) -> list[str]:
@@ -114,7 +187,7 @@ def assert_no_traceback(case: unittest.TestCase, target: str, out: str, err: str
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class UnitedStatesTest(unittest.TestCase):
-    def test_ten_domestic_filers_return_an_annual_report(self):
+    def test_domestic_filers_return_an_annual_report(self):
         chosen = sample(US_POOL)
         print(f"\n  US sample: {', '.join(chosen)}")
         for ticker in chosen:
@@ -127,32 +200,49 @@ class UnitedStatesTest(unittest.TestCase):
                 blocked = environment_block(out, err)
                 if blocked:
                     self.skipTest(f"{ticker}: sec.gov unreachable here ({blocked})")
-                rows = [ln for ln in out.splitlines() if "10-K" in ln and "http" in ln]
+                # Match on the document URL, not on "10-K" plus "http":
+                # the no-filings fallback prints EDGAR search links carrying
+                # `&forms=10-K`, so the looser filter counted those as
+                # filings and then asserted an Archives URL against a search
+                # URL. XOM, whose 10-Ks sit under its pre-reorganisation
+                # CIK, failed on exactly that.
+                rows = [ln for ln in out.splitlines() if "sec.gov/Archives" in ln]
                 if not rows:
                     # A successor entity legitimately has no 10-K yet, but the
                     # script has to explain that rather than shrug.
                     self.assertIn("No 10-K filings found", out)
                     self.assertIn("successor entity", out)
                     continue
-                self.assertIn("sec.gov/Archives", rows[0])
+                self.assertIn("10-K", rows[0])
 
-    def test_ten_foreign_private_issuers_return_a_20f(self):
+    def test_foreign_private_issuers_return_their_annual_form(self):
         chosen = sample(US_FPI_POOL)
-        print(f"\n  US (20-F) sample: {', '.join(chosen)}")
-        for ticker in chosen:
-            with self.subTest(ticker=ticker):
+        print(f"\n  US (FPI) sample: "
+              f"{', '.join(f'{t} {f}' for t, f in chosen)}")
+        for ticker, form in chosen:
+            with self.subTest(ticker=ticker, form=form):
                 code, out, err = run_script("fetch_us_filings.py", ticker,
-                                            "--forms", "20-F", "--limit", "1")
+                                            "--forms", form, "--limit", "1")
                 assert_no_traceback(self, ticker, out, err)
+                blocked = environment_block(out, err)
+                if blocked:
+                    self.skipTest(f"{ticker}: {blocked}")
                 if code != 0:
-                    self.skipTest(f"{ticker}: SEC unavailable")
-                self.assertTrue("20-F" in out or "No 20-F filings found" in out,
-                                f"{ticker}: unexpected output {out[:200]}")
+                    self.skipTest(f"{ticker}: SEC unavailable -- {err[-200:]}")
+                # No "or nothing found" escape: each of these was confirmed
+                # to file this form, so an empty answer is a real failure.
+                # Asserted against the document row rather than the whole
+                # output, so an EDGAR search link carrying `&forms=20-F`
+                # cannot stand in for a filing.
+                rows = [ln for ln in out.splitlines() if "sec.gov/Archives" in ln]
+                self.assertTrue(rows, f"{ticker}: no {form} document in {out[:250]}")
+                self.assertIn(form, rows[0],
+                              f"{ticker}: first document is not a {form}: {rows[0]}")
 
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class ChinaTest(unittest.TestCase):
-    def test_ten_a_share_issuers_return_an_annual_report(self):
+    def test_a_share_issuers_return_an_annual_report(self):
         chosen = sample(CN_POOL)
         print(f"\n  China sample: {', '.join(chosen)}")
         for code_ in chosen:
@@ -179,7 +269,7 @@ class ChinaTest(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class TaiwanTest(unittest.TestCase):
-    def test_ten_issuers_either_list_filings_or_report_the_refusal(self):
+    def test_issuers_either_list_filings_or_report_the_refusal(self):
         chosen = sample(TW_POOL)
         print(f"\n  Taiwan sample: {', '.join(chosen)}")
         refused = 0
@@ -211,7 +301,7 @@ class TaiwanTest(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class JapanTest(unittest.TestCase):
-    def test_ten_issuers_list_disclosures_or_say_the_window_is_empty(self):
+    def test_issuers_list_disclosures_or_say_the_window_is_empty(self):
         chosen = sample(JP_POOL)
         print(f"\n  Japan sample: {', '.join(chosen)}")
         for code_ in chosen:
@@ -230,7 +320,7 @@ class JapanTest(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class LondonTest(unittest.TestCase):
-    def test_ten_issuers_either_list_documents_or_report_the_retired_index(self):
+    def test_issuers_either_list_documents_or_report_the_retired_index(self):
         chosen = sample(UK_POOL)
         print(f"\n  London sample: {', '.join(chosen)}")
         for company in chosen:
@@ -256,7 +346,7 @@ class LondonTest(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class HongKongTest(unittest.TestCase):
-    def test_ten_issuers_resolve_to_a_stock_code(self):
+    def test_issuers_resolve_to_a_stock_code(self):
         # HKEX has no clean fetch API, so the programmatic step is the name
         # lookup; the plain equity should be the first row.
         chosen = sample(HK_POOL)
@@ -302,7 +392,7 @@ class SingaporeTest(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertIn(kind, kinds)
 
-    def test_ten_trading_codes_resolve_to_their_own_issuer(self):
+    def test_trading_codes_resolve_to_their_own_issuer(self):
         chosen = sample([r["code"] for r in self.issuers])
         print(f"\n  Singapore code sample: {', '.join(chosen)}")
         for code in chosen:
@@ -320,7 +410,7 @@ class SingaporeTest(unittest.TestCase):
                 # The manual step has to be stated, not glossed over.
                 self.assertIn("company-announcements", out)
 
-    def test_ten_suffixed_codes_resolve_the_same_way(self):
+    def test_suffixed_codes_resolve_the_same_way(self):
         chosen = sample([r["code"] for r in self.issuers])
         print(f"\n  Singapore .SI sample: {', '.join(c + '.SI' for c in chosen)}")
         for code in chosen:
@@ -333,7 +423,7 @@ class SingaporeTest(unittest.TestCase):
                 self.assertEqual(rc, 0, f"{code}.SI: exited {rc}")
                 self.assertTrue(out.splitlines()[0].startswith(code))
 
-    def test_ten_issuer_names_resolve_to_a_code(self):
+    def test_issuer_names_resolve_to_a_code(self):
         chosen = sample(self.issuers)
         print(f"\n  Singapore name sample: "
               f"{', '.join(r['name'] for r in chosen)}")

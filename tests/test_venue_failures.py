@@ -14,6 +14,8 @@ from __future__ import annotations
 import io
 import json
 import sys
+import pathlib
+import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
@@ -350,6 +352,147 @@ class HostRefusedReportingTest(unittest.TestCase):
         self.assertEqual(exit_.exception.code, 1)
         self.assertIn("use MOPS", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
+
+
+class TaiwanDirectoryRefusalTest(unittest.TestCase):
+    """The company directory used for name resolution is served by
+    openapi.twse.com.tw, which returns the same HTTP-200 refusal page as the
+    document server -- and used to be reported as unreadable JSON."""
+
+    BLOCK = (b"<html><body>\n FOR SECURITY REASONS, THIS PAGE CAN NOT BE "
+             b"ACCESSED.<BR>\n</body></html>")
+
+    def test_the_refusal_page_is_recognised_not_parsed(self):
+        import resolve_name
+        with self.assertRaises(net_errors.HostRefused) as caught:
+            resolve_name._twse_not_blocked(self.BLOCK)
+        message = str(caught.exception)
+        self.assertIn("openapi.twse.com.tw", message)
+        self.assertIn("mops.twse.com.tw", message)
+
+    def test_real_json_passes_the_check(self):
+        import resolve_name
+        resolve_name._twse_not_blocked(b'[{"\u516c\u53f8\u4ee3\u865f": "2330"}]')
+
+    def test_name_resolution_reports_the_refusal_rather_than_a_parse_error(self):
+        import resolve_name
+        with mock.patch.object(resolve_name, "_get", return_value=self.BLOCK), \
+                mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                                  return_value=False):
+            rows = resolve_name.search_tw("TSMC")
+        self.assertEqual(len(rows), 1)
+        venue, code, detail = rows[0]
+        self.assertEqual((venue, code), ("tw", "ERROR"))
+        self.assertIn("TWSE refused", detail)
+        self.assertNotIn("JSON", detail)
+
+    def test_a_non_json_body_from_any_venue_is_called_a_refusal(self):
+        # The generic path: a directory that answers with HTML instead of
+        # JSON is the host declining, not an empty result set.
+        import resolve_name
+        with mock.patch.object(resolve_name, "_get", return_value=b"<html>nope"), \
+                mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                                  return_value=False), \
+                self.assertRaises(net_errors.HostRefused) as caught:
+            resolve_name._cached_json("probe.json", "https://example.invalid/x")
+        self.assertIn("not JSON", str(caught.exception))
+
+    def test_a_good_answer_is_cached_and_then_re_used(self):
+        # The point of the cache: SEC's ticker map is 10,413 entries, and
+        # re-downloading it per lookup is what trips its 429s. Nothing
+        # asserted this, so a regression that stopped caching entirely
+        # would have gone unnoticed until the rate limit hit.
+        import resolve_name
+        stored = {}
+        with mock.patch.object(resolve_name, "_get",
+                               return_value=b'{"a": 1}') as fetch, \
+                mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                                  return_value=False), \
+                mock.patch.object(resolve_name.disk_cache, "store",
+                                  side_effect=lambda p, d: stored.update({p: d})):
+            data = resolve_name._cached_json("probe.json", "https://example.invalid/x")
+        self.assertEqual(data, {"a": 1})
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(list(stored.values()), [b'{"a": 1}'])
+
+    def test_a_fresh_cache_is_read_instead_of_refetching(self):
+        import json as json_mod
+
+        import resolve_name
+        with tempfile.TemporaryDirectory() as base:
+            path = pathlib.Path(base) / "probe.json"
+            path.write_text(json_mod.dumps({"cached": True}), encoding="utf-8")
+            with mock.patch.object(resolve_name.disk_cache, "cache_path",
+                                   return_value=str(path)), \
+                    mock.patch.object(resolve_name, "_get",
+                                      side_effect=AssertionError(
+                                          "a fresh cache must not refetch")):
+                data = resolve_name._cached_json("probe.json",
+                                                 "https://example.invalid/x")
+        self.assertEqual(data, {"cached": True})
+
+    def test_a_refusal_is_never_cached(self):
+        # Caching one would re-serve it for a day without another request.
+        import resolve_name
+        stored = []
+        with mock.patch.object(resolve_name, "_get", return_value=b"<html>nope"), \
+                mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                                  return_value=False), \
+                mock.patch.object(resolve_name.disk_cache, "store",
+                                  side_effect=lambda p, d: stored.append(p)):
+            with self.assertRaises(net_errors.HostRefused):
+                resolve_name._cached_json("probe.json", "https://example.invalid/x")
+        self.assertEqual(stored, [])
+
+
+class JapanDirectoryTest(unittest.TestCase):
+    """JPX moved the list to .xlsx, which xlrd 2.x cannot read at all; the
+    old .xls URL 404s, and that was hidden behind a "pip install xlrd"
+    message on any machine without xlrd."""
+
+    def test_the_directory_url_is_the_xlsx_one(self):
+        import resolve_name
+        self.assertTrue(resolve_name.JPX_DIRECTORY_URL.endswith(".xlsx"))
+
+    def test_nothing_still_reaches_for_xlrd(self):
+        # The word itself stays, in the comment explaining why it went; what
+        # must not come back is the import or the install instruction.
+        text = (ROOT / "scripts" / "resolve_name.py").read_text(encoding="utf-8")
+        self.assertNotIn("import xlrd", text)
+        self.assertNotIn("pip install xlrd", text)
+
+    def test_a_failed_cache_write_does_not_fail_the_lookup(self):
+        # store() swallows write failures by design, so reading the cache
+        # back would turn a successful download into an ERROR row.
+        import importlib.util
+
+        import resolve_name
+        if importlib.util.find_spec("openpyxl") is None:
+            self.skipTest("openpyxl not installed")
+        with mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                               return_value=False), \
+                mock.patch.object(resolve_name.disk_cache, "store",
+                                  lambda path, data: None), \
+                mock.patch.object(resolve_name, "_get",
+                                  return_value=_minimal_xlsx()):
+            rows = resolve_name.search_jp("Widget")
+        self.assertEqual(rows, [("jp", "1234.T", "Widget Corporation")])
+
+
+def _minimal_xlsx() -> bytes:
+    """A one-row workbook in JPX's column layout, as bytes."""
+    import io
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(["Effective Date", "Local Code", "Name (English)",
+                  "Section/Products"])
+    sheet.append([20260831, 1234, "Widget Corporation", "Prime Market"])
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
 
 
 if __name__ == "__main__":

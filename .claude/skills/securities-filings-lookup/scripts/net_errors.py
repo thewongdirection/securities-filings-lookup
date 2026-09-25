@@ -19,6 +19,7 @@ Usage in a script:
 from __future__ import annotations
 
 import errno
+import http.client
 import socket
 import ssl
 import sys
@@ -150,6 +151,17 @@ def explain(exc: BaseException) -> str:
             return PROXY_BLOCK.format(detail=text)
         return f"Network error: {text}. {FALLBACK}"
 
+    if isinstance(exc, http.client.HTTPException):
+        # Not an OSError, so this used to escape run() as a traceback: a
+        # response cut short or garbled mid-read (IncompleteRead,
+        # BadStatusLine) rather than a connection that never formed.
+        # No host to name: an HTTPException carries no URL, unlike HTTPError.
+        return (f"The server sent a reply this client could not finish "
+                f"reading ({type(exc).__name__}: {exc}). That is usually a "
+                f"transient server-side cut rather than a bad request -- "
+                f"retry once, and if it persists, "
+                f"{FALLBACK[0].lower() + FALLBACK[1:]}")
+
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -157,9 +169,12 @@ def run(main) -> None:
     """Call main(), reporting failures plainly. Exits 1 on failure."""
     try:
         main()
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
         # URLError subclasses OSError, and HTTPError subclasses URLError;
         # one clause covers HTTP status errors, DNS, TLS and proxy refusals.
+        # HTTPException is listed separately because IncompleteRead and
+        # BadStatusLine are NOT OSErrors -- a reply truncated mid-read
+        # therefore used to reach the user as a stack trace.
         print(explain(exc), file=sys.stderr)
         sys.exit(1)
     except (SetupError, HostRefused) as exc:

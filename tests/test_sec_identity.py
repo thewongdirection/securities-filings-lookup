@@ -15,6 +15,7 @@ a softer request; it has to stop and say so.
 """
 from __future__ import annotations
 
+import contextlib
 import sys
 import tempfile
 import unittest
@@ -164,6 +165,25 @@ class StorageTest(unittest.TestCase):
         self.assertIn(sec_identity.CONFIG_FILENAME, ignored)
 
 
+@contextlib.contextmanager
+def isolated_cache():
+    """Point the venue cache at an empty directory, and yield it.
+
+    The ticker map is cached for a day, so without this a warm cache on
+    the developer's machine means _get is never called and these tests
+    assert nothing. disk_cache memoizes its directory, hence the clears.
+    """
+    import disk_cache
+    with tempfile.TemporaryDirectory() as base:
+        disk_cache.cache_dir.cache_clear()
+        try:
+            with mock.patch.object(disk_cache.tempfile, "gettempdir",
+                                   return_value=base):
+                yield disk_cache.cache_dir()
+        finally:
+            disk_cache.cache_dir.cache_clear()
+
+
 class CallerWiringTest(unittest.TestCase):
     """Every SEC-facing request has to go through the resolver."""
 
@@ -238,9 +258,7 @@ class CallerWiringTest(unittest.TestCase):
 
         # The ticker map is cached in the temp dir for a day; point that
         # somewhere empty or a warm cache means _get is never called.
-        with tempfile.TemporaryDirectory() as cache_dir, \
-                mock.patch.object(resolve_name.tempfile, "gettempdir",
-                                  return_value=cache_dir), \
+        with isolated_cache(), \
                 mock.patch.object(resolve_name, "_get", fake_get), \
                 mock.patch.object(sec_identity, "resolve", return_value=GOOD):
             resolve_name.search_us("microsoft")
@@ -250,9 +268,7 @@ class CallerWiringTest(unittest.TestCase):
     def test_a_missing_contact_fails_only_the_us_venue(self):
         # A multi-venue name lookup must not die because SEC needs a contact.
         import resolve_name
-        with tempfile.TemporaryDirectory() as cache_dir, \
-                mock.patch.object(resolve_name.tempfile, "gettempdir",
-                                  return_value=cache_dir), \
+        with isolated_cache(), \
                 mock.patch.object(sec_identity, "resolve",
                                   side_effect=sec_identity.MissingSecContact("nope")):
             rows = resolve_name.search_us("microsoft")
@@ -264,16 +280,14 @@ class CallerWiringTest(unittest.TestCase):
         # eagerly as an argument.
         import json
         import resolve_name
-        with tempfile.TemporaryDirectory() as cache_dir:
+        with isolated_cache() as cache_dir:
             (Path(cache_dir) / "sec_company_tickers.json").write_text(
                 json.dumps({"0": {"ticker": "MSFT", "cik_str": 789019,
                                   "title": "MICROSOFT CORP"}}),
                 encoding="utf-8")
-            with mock.patch.object(resolve_name.tempfile, "gettempdir",
-                                   return_value=cache_dir), \
-                    mock.patch.object(sec_identity, "resolve",
-                                      side_effect=AssertionError(
-                                          "resolve() must not be called on a cache hit")):
+            with mock.patch.object(sec_identity, "resolve",
+                                   side_effect=AssertionError(
+                                       "resolve() must not be called on a cache hit")):
                 rows = resolve_name.search_us("microsoft")
         self.assertEqual(rows, [("us", "MSFT", "MICROSOFT CORP")])
 

@@ -7,6 +7,7 @@ are not reachable from every environment and must never gate a test run.
 """
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import os
@@ -410,6 +411,30 @@ class NetworkErrorReportingTest(unittest.TestCase):
         self.assertEqual(exit_.exception.code, 1)
         self.assertIn("Rate limited", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_a_reply_truncated_mid_read_is_not_a_traceback(self):
+        # IncompleteRead and BadStatusLine are HTTPExceptions but NOT
+        # OSErrors, so they escaped run() entirely: a CNINFO response cut
+        # short mid-read reached the user as a stack trace, which is the
+        # one thing SKILL.md promises these scripts never do.
+        for exc in (http.client.IncompleteRead(b"12345"),
+                    http.client.BadStatusLine("garbage")):
+            with self.subTest(error=type(exc).__name__):
+                def boom():
+                    raise exc
+
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr), \
+                        self.assertRaises(SystemExit) as exit_:
+                    net_errors.run(boom)
+                self.assertEqual(exit_.exception.code, 1)
+                self.assertNotIn("Traceback", stderr.getvalue())
+                self.assertIn("could not finish reading", stderr.getvalue())
+
+    def test_a_truncated_reply_is_described_as_transient(self):
+        message = net_errors.explain(http.client.IncompleteRead(b"1234"))
+        self.assertIn("transient", message)
+        self.assertIn("retry once", message)
 
     def test_successful_main_is_left_alone(self):
         calls = []

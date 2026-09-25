@@ -72,7 +72,7 @@ Two consequences worth knowing:
   Where a Chromium is already installed but Playwright pins a different build (Claude Code on the web), the scripts fall back to the browser under `PLAYWRIGHT_BROWSERS_PATH`; `SKILL_CHROMIUM_PATH` forces a specific binary.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
 - **For Taiwan filings** (and some IR-site downloads): `pip install certifi` — several issuers' TLS chains are missing from default trust stores; the scripts pick up certifi automatically.
-- **For Japan name lookup**: `pip install xlrd` (JPX's company directory is an old-format .xls). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
+- **For Japan name lookup**: `pip install openpyxl` (JPX's company directory is an .xlsx; it used to be .xls, and that URL now 404s). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
 
 ## Network access (cloud containers, proxies, locked-down networks)
 
@@ -130,7 +130,7 @@ That list is necessarily incomplete — German annual reports usually come from 
 
 claude.ai/code → the cloud icon showing the environment name (the row above the message box) → hover the environment → settings gear → **Network access** → **Custom** → paste the list into **Allowed domains**, one per line.
 
-Keep **Also include default list of common package managers** ticked: the optional `playwright`, `certifi`, `pypdf` and `xlrd` installs come from PyPI. Wildcards work too (`*.cninfo.com.cn`, `*.twse.com.tw`, `*.hkexnews.hk`), though `api.data.fca.org.uk` is two levels deep so it is safer spelled out. **Full** network access covers everything without a list.
+Keep **Also include default list of common package managers** ticked: the optional `playwright`, `certifi`, `pypdf` and `openpyxl` installs come from PyPI. Wildcards work too (`*.cninfo.com.cn`, `*.twse.com.tw`, `*.hkexnews.hk`), though `api.data.fca.org.uk` is two levels deep so it is safer spelled out. **Full** network access covers everything without a list.
 
 Three things that catch people out:
 

@@ -5,7 +5,7 @@ Two official systems split Japan's disclosures:
 - **TDnet** (`www.release.tdnet.info`, TSE's timely-disclosure network) — earnings reports (決算短信), dividend/buyback/guidance notices, corporate actions. **Keyless and scriptable** — this is the bundled script's source, and for "the latest results" it's the document people actually want.
 - **EDINET** (`disclosure2.edinet-fsa.go.jp`, the FSA's statutory system) — annual securities reports (有価証券報告書), quarterly reports, large-shareholding filings. **The API (v2) requires a subscription key** — free registration at `api.edinet-fsa.go.jp`, then set it as the `EDINET_API_KEY` environment variable and use `fetch_jp_filings.py <code> --edinet-date YYYY-MM-DD` (annual reports cluster ~3 months after fiscal year end — late June for March year-ends). Verified live: keyless calls return 401 and the script says so; the with-key path follows the documented API (documents.json list + documents/{docID}?type=2 PDF) but has not been exercised with a live key yet. Guessed web-UI JSON endpoints 404'd, don't re-try them.
 
-**Company names** resolve via JPX's official English directory (`resolve_name.py --venues jp`) — the full TSE company list with English names, cached daily. Needs `pip install xlrd` (the file is old-format .xls).
+**Company names** resolve via JPX's official English directory (`resolve_name.py --venues jp`) — the full TSE company list with English names, cached daily. Needs `pip install openpyxl` (an .xlsx; JPX retired the old .xls, whose URL now 404s).
 
 ## Ticker format
 

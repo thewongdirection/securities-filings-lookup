@@ -26,18 +26,17 @@ SKILL.md's confirmation rule; don't silently pick one.
 from __future__ import annotations
 
 import argparse
+import io
 import json
-import os
 import ssl
 import sys
-import tempfile
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
+import disk_cache
 import sec_identity
-from net_errors import run
+from net_errors import HostRefused, run
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -71,24 +70,34 @@ def _post(url: str, data: bytes, content_type: str, timeout: int = 30) -> bytes:
 
 
 def _cached_json(cache_name: str, url: str, ttl: int = 86400,
-                 user_agent=None):
+                 user_agent=None, inspect=None):
     """Cached JSON fetch. `user_agent` may be a callable, resolved only on
     a cache miss -- SEC needs a declared contact to make a request, not to
-    read yesterday's answer off disk."""
-    cache = os.path.join(tempfile.gettempdir(), cache_name)
+    read yesterday's answer off disk. `inspect` gets the raw bytes before
+    they are parsed, for venues that refuse with an HTTP 200 page.
+
+    Nothing is cached until it parses, so a refusal never lands on disk to
+    be re-read for a day.
+    """
+    cache = disk_cache.cache_path(cache_name)
     try:
-        if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < ttl:
+        if disk_cache.is_fresh(cache, ttl):
             with open(cache, encoding="utf-8") as f:
                 return json.load(f)
     except (OSError, json.JSONDecodeError):
         pass
     raw = _get(url, user_agent=user_agent() if callable(user_agent) else user_agent)
-    data = json.loads(raw.decode())
+    if inspect is not None:
+        inspect(raw)
     try:
-        with open(cache, "wb") as f:
-            f.write(raw)
-    except OSError:
-        pass
+        data = json.loads(raw.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        host = urllib.parse.urlsplit(url).hostname or url
+        raise HostRefused(
+            f"{host} answered with {len(raw)} bytes that are not JSON: "
+            f"{raw[:80]!r}. That is the host declining this client, not an "
+            "empty result.") from exc
+    disk_cache.store(cache, raw)
     return data
 
 
@@ -140,12 +149,24 @@ def search_cn(q: str) -> list[tuple[str, str, str]]:
             if e.get("category") == "A股"]
 
 
+TWSE_DIRECTORY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+
+
+def _twse_not_blocked(raw: bytes) -> None:
+    """openapi.twse.com.tw serves the same HTTP-200 refusal as the document
+    server, so the company directory has to recognise it too."""
+    from fetch_tw_filings import is_blocked, refusal
+
+    if is_blocked(raw.decode("utf-8", errors="replace")):
+        raise refusal("openapi.twse.com.tw")
+
+
 def search_tw(q: str) -> list[tuple[str, str, str]]:
     ql = q.lower()
     try:
-        data = _cached_json("twse_companies.json",
-                            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L")
-    except Exception as e:
+        data = _cached_json("twse_companies.json", TWSE_DIRECTORY_URL,
+                            inspect=_twse_not_blocked)
+    except Exception as e:  # noqa: BLE001 - one venue failing is not fatal
         return [("tw", "ERROR", str(e))]
     out = []
     for c in data:
@@ -157,31 +178,57 @@ def search_tw(q: str) -> list[tuple[str, str, str]]:
     return out[:8]
 
 
+# JPX moved this list from .xls to .xlsx, which also changed which reader
+# can open it: xlrd 2.x dropped xlsx support entirely, so openpyxl it is.
+# The old .xls URL now 404s -- and that went unnoticed because the missing
+# xlrd was reported first, so the venue said "SKIPPED" rather than "the
+# directory has moved".
+JPX_DIRECTORY_URL = ("https://www.jpx.co.jp/english/markets/statistics-equities/"
+                     "misc/tvdivq0000001vg2-att/data_e.xlsx")
+# Columns, confirmed against the live file (4,441 rows, 2026-09):
+# 0 Effective Date | 1 Local Code | 2 Name (English) | 3 Section/Products
+JPX_CODE_COLUMN = 1
+JPX_NAME_COLUMN = 2
+
+
 def search_jp(q: str) -> list[tuple[str, str, str]]:
-    """JPX's English listed-company directory (an old-format .xls;
-    requires xlrd: pip install xlrd)."""
+    """JPX's English listed-company directory (an .xlsx; needs openpyxl)."""
     try:
-        import xlrd
+        import openpyxl
     except ImportError:
-        return [("jp", "SKIPPED", "pip install xlrd to enable Japan name lookup")]
-    cache = os.path.join(tempfile.gettempdir(), "jpx_companies_e.xls")
+        return [("jp", "SKIPPED",
+                 "pip install openpyxl to enable Japan name lookup")]
+    cache = disk_cache.cache_path("jpx_companies_e.xlsx")
     try:
-        if not (os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 86400):
-            data = _get("https://www.jpx.co.jp/english/markets/statistics-equities/"
-                        "misc/tvdivq0000001vg2-att/data_e.xls", timeout=60)
-            with open(cache, "wb") as f:
-                f.write(data)
-        sh = xlrd.open_workbook(cache).sheet_by_index(0)
-    except Exception as e:
+        if disk_cache.is_fresh(cache):
+            source = cache
+        else:
+            data = _get(JPX_DIRECTORY_URL, timeout=90)
+            disk_cache.store(cache, data)
+            # Read the bytes in hand, not the file just written: store()
+            # swallows write failures by design, and reading back a cache
+            # that never landed would fail the lookup that had already
+            # succeeded.
+            source = io.BytesIO(data)
+        book = openpyxl.load_workbook(source, read_only=True, data_only=True)
+    except Exception as e:  # noqa: BLE001 - one venue failing is not fatal
         return [("jp", "ERROR", str(e))]
     ql = q.lower()
     out = []
-    for r in range(1, sh.nrows):
-        name = str(sh.cell_value(r, 2))
-        if ql in name.lower():
-            code = str(sh.cell_value(r, 1)).split(".")[0]
-            out.append(("jp", code + ".T", name))
-    return out[:8]
+    try:
+        sheet = book[book.sheetnames[0]]
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            name = str(row[JPX_NAME_COLUMN] or "")
+            if ql and ql in name.lower():
+                code = str(row[JPX_CODE_COLUMN] or "").split(".")[0]
+                out.append(("jp", code + ".T", name))
+                if len(out) >= 8:
+                    break
+    except Exception as e:  # noqa: BLE001 - a layout change, not a crash
+        return [("jp", "ERROR", f"JPX directory layout changed: {e}")]
+    finally:
+        book.close()
+    return out
 
 
 def search_uk(q: str) -> list[tuple[str, str, str]]:

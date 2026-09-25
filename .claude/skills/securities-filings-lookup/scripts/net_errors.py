@@ -40,7 +40,7 @@ class HostRefused(RuntimeError):
 
 
 class SetupError(RuntimeError):
-    """Something about the environment needs fixing, and the message says how.
+    """The environment or the invocation needs fixing, and the message says how.
 
     Distinct from an ordinary RuntimeError: those are bugs or source-format
     changes, and they keep their traceback so they can be debugged.

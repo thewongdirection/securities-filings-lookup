@@ -32,7 +32,18 @@ SUFFIX_MAP = {
     ".T": "tokyo",
     ".DE": "frankfurt",  # XETRA
     ".F": "frankfurt",
+    ".SI": "singapore",
+    ".SGX": "singapore",
 }
+
+# SGX trading codes are three or four alphanumerics in every combination.
+# Counted from the live directory (1,333 securities, 2026-09; the total
+# drifts as instruments list and expire): 747 are pure letters, which is
+# also the shape of a US ticker; 27 are pure digits, which is also the shape
+# of a Hong Kong code; and 559 mix the two. No other venue in this skill
+# uses that mixed shape, so those can be claimed outright -- the other two
+# shapes keep their existing venue and get a note instead.
+SGX_MIXED_CODE = re.compile(r"^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{3,4}$")
 
 
 def identify(raw: str) -> dict:
@@ -55,6 +66,10 @@ def identify(raw: str) -> dict:
                     "(2330 = TSMC) and Tokyo (7203 = Toyota) formats. If the "
                     "company is Taiwanese or Japanese, use the .TW / .T "
                     "suffix or confirm with a search.")
+        elif len(t) == 3:
+            note = ("Assumed Hong Kong; 27 SGX trading codes are also bare "
+                    "digits (533 = ABR in Singapore). Use .SI if you mean "
+                    "Singapore, or confirm with a search.")
         return _result(raw, "hong_kong", t.zfill(5), note=note)
 
     if re.fullmatch(r"\d{6}", t):
@@ -80,8 +95,17 @@ def identify(raw: str) -> dict:
             raw, "united_states", t.replace(".", "-"),
             note="Confirm with a search if this could be a foreign private "
                  "issuer or dual-listed company (e.g. a Chinese ADR that "
-                 "also trades in Hong Kong).",
+                 "also trades in Hong Kong). An all-letter ticker is also "
+                 "the shape of 747 SGX trading codes -- use .SI for "
+                 "Singapore.",
         )
+
+    if SGX_MIXED_CODE.match(t):
+        return _result(
+            raw, "singapore", t,
+            note="Codes mixing letters and digits like this are SGX trading "
+                 "codes and nothing else in this skill's venues; add the .SI "
+                 "suffix to be explicit.")
 
     return _result(
         raw, "unknown", t,

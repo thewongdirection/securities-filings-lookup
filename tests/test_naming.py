@@ -64,6 +64,21 @@ class FilingNameTest(unittest.TestCase):
                                ext=".zip"),
             "ASTRAZENECA_Annual Report_2026-02-12.zip")
 
+    def test_an_empty_part_is_left_out_rather_than_filled_in(self):
+        # safe_filename falls back to "document" so that it alone can name
+        # a file; applied per fragment, that fallback landed in the date's
+        # place -- SGXNet documents, which often carry no date, came out
+        # as `C52_Annual Report 2025_document_880529.pdf`.
+        self.assertEqual(naming.filing_name("C52", "Annual Report 2025", "",
+                                            "880529"),
+                         "C52_Annual Report 2025_880529.pdf")
+        self.assertEqual(naming.filing_name("D05", "", "2026-03-09"),
+                         "D05_2026-03-09.pdf")
+
+    def test_a_name_with_nothing_in_it_is_still_openable(self):
+        self.assertEqual(naming.filing_name("", "", ""), "document.pdf")
+        self.assertEqual(naming.filing_name("   ", "  ", " "), "document.pdf")
+
     def test_a_dangerous_label_cannot_escape_the_directory(self):
         name = naming.filing_name("X", "../../etc/passwd", "2026-01-01")
         self.assertNotIn("/", name)

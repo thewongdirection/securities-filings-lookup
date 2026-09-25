@@ -1,0 +1,94 @@
+{
+ "_comment": "Trimmed from https://api.sgx.com/securities/v1.1 (2026-09-25): identity fields only (nc = trading code, n = name, m = board, type = security type). Includes a REIT, a Catalist name and a daily-leverage certificate so the issuer filter is exercised. Prices are dropped -- this is a parser fixture, not market data.",
+ "meta": {
+  "code": "200"
+ },
+ "data": {
+  "prices": [
+   {
+    "nc": "LVR",
+    "n": "17LIVE GROUP",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "533",
+    "n": "ABR",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "A17U",
+    "n": "CapLand Ascendas REIT",
+    "m": "MAINBOARD",
+    "type": "reits"
+   },
+   {
+    "nc": "C38U",
+    "n": "CapLand IntCom T",
+    "m": "MAINBOARD",
+    "type": "reits"
+   },
+   {
+    "nc": "D05",
+    "n": "DBS",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "Z5TW",
+    "n": "DBS 5xLongSG280223",
+    "m": "MAINBOARD",
+    "type": "dlcertificates"
+   },
+   {
+    "nc": "BN4",
+    "n": "Keppel",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "ME8U",
+    "n": "Mapletree Ind Tr",
+    "m": "MAINBOARD",
+    "type": "reits"
+   },
+   {
+    "nc": "O39",
+    "n": "OCBC Bank",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "5E2",
+    "n": "Seatrium Ltd",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "S68",
+    "n": "SGX",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "C6L",
+    "n": "SIA",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "Z74",
+    "n": "Singtel",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   },
+   {
+    "nc": "CC3",
+    "n": "StarHub",
+    "m": "MAINBOARD",
+    "type": "stocks"
+   }
+  ]
+ }
+}

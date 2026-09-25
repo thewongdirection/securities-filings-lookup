@@ -210,15 +210,34 @@ def search_uk(q: str) -> list[tuple[str, str, str]]:
     return out[:8]
 
 
+def search_sg(q: str) -> list[tuple[str, str, str]]:
+    """SGX's own securities directory: code, name and security type.
+
+    Reporting issuers are listed first -- a search for "DBS" should lead
+    with the bank, not with one of its leveraged certificates.
+    """
+    try:
+        from fetch_sg_filings import find, is_issuer, load_directory
+        matches = find(q, load_directory())
+    except Exception as e:  # noqa: BLE001 - one venue failing is not fatal
+        return [("sg", "ERROR", str(e))]
+    out = []
+    for row in matches:
+        label = row["name"] + ("" if is_issuer(row) else f" ({row['type']})")
+        out.append(("sg", row["code"] + ".SI", label))
+    return out[:8]
+
+
 VENUES = {"us": search_us, "hk": search_hk, "cn": search_cn,
-          "tw": search_tw, "uk": search_uk, "jp": search_jp}
+          "tw": search_tw, "uk": search_uk, "jp": search_jp,
+          "sg": search_sg}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name", help="Company name (or fragment) to resolve")
-    parser.add_argument("--venues", default="us,hk,cn,tw,uk,jp",
-                        help="Comma-separated subset of us,hk,cn,tw,uk,jp "
+    parser.add_argument("--venues", default="us,hk,cn,tw,uk,jp,sg",
+                        help="Comma-separated subset of us,hk,cn,tw,uk,jp,sg "
                              "(no directory exists for Germany -- web search)")
     parser.add_argument("--user-agent",
                         help="Contact for SEC's fair-access policy, e.g. "

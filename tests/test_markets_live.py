@@ -65,6 +65,11 @@ UK_POOL = ["AstraZeneca", "HSBC", "Shell", "Unilever", "BP", "GSK", "Diageo",
 HK_POOL = ["Tencent", "HSBC", "China Mobile", "AIA", "Alibaba", "Meituan",
            "Hong Kong Exchanges", "ICBC", "Ping An", "CNOOC", "Xiaomi",
            "JD.com", "Galaxy Entertainment", "Sands China", "Bank of China"]
+# Singapore samples from the live securities directory rather than a
+# hardcoded list: the directory is the venue's own source of truth, so the
+# sample is always current and never goes stale as issuers delist.
+SG_ANNOUNCEMENT = "U6RBLH1JFNDV1QZT"  # DBS FY2025 annual report, 2 attachments
+
 # Frankfurt has no script: the venue is a browse/IR workflow by design.
 DE_POOL = ["SAP.DE", "SIE.DE", "ALV.DE", "BAS.DE", "BMW.DE", "MBG.DE",
            "DTE.DE", "BAYN.DE", "DBK.DE", "VOW3.DE", "MUV2.DE", "RWE.DE"]
@@ -268,6 +273,131 @@ class HongKongTest(unittest.TestCase):
                     self.skipTest(f"{name}: no HK candidates -- {out.strip()[:120]}")
                 self.assertRegex(rows[0][1], r"^\d{5}\.HK$",
                                  f"{name}: first row is not a stock code")
+
+
+@unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
+class SingaporeTest(unittest.TestCase):
+    """SGX is scriptable either side of discovery, so both halves are tested:
+    resolving an issuer, and reading a real announcement's documents."""
+
+    @classmethod
+    def setUpClass(cls):
+        import fetch_sg_filings
+        cls.sg = fetch_sg_filings
+        try:
+            directory = fetch_sg_filings.load_directory()
+        except Exception as exc:                      # noqa: BLE001
+            raise unittest.SkipTest(f"SGX directory unavailable: {exc}") from exc
+        cls.issuers = [r for r in directory if fetch_sg_filings.is_issuer(r)]
+        if len(cls.issuers) < SAMPLE_SIZE:
+            raise unittest.SkipTest(
+                f"only {len(cls.issuers)} reporting issuers in the directory")
+
+    def test_the_directory_covers_every_kind_of_reporting_issuer(self):
+        # /securities/v1.1/stocks would satisfy "stocks" alone while
+        # silently dropping the REITs and trusts, which is the mistake
+        # this venue's fetcher exists to avoid.
+        kinds = {row["type"] for row in self.issuers}
+        for kind in ("stocks", "reits", "businesstrusts"):
+            with self.subTest(kind=kind):
+                self.assertIn(kind, kinds)
+
+    def test_ten_trading_codes_resolve_to_their_own_issuer(self):
+        chosen = sample([r["code"] for r in self.issuers])
+        print(f"\n  Singapore code sample: {', '.join(chosen)}")
+        for code in chosen:
+            with self.subTest(code=code):
+                rc, out, err = run_script("fetch_sg_filings.py", code)
+                assert_no_traceback(self, code, out, err)
+                blocked = environment_block(out, err)
+                if blocked:
+                    self.skipTest(f"{code}: {blocked}")
+                self.assertEqual(rc, 0, f"{code}: exited {rc}\n{err[-400:]}")
+                first = out.splitlines()[0]
+                self.assertTrue(first.startswith(code),
+                                f"{code}: first row is {first!r}")
+                self.assertNotIn("(not a reporting issuer)", first)
+                # The manual step has to be stated, not glossed over.
+                self.assertIn("company-announcements", out)
+
+    def test_ten_suffixed_codes_resolve_the_same_way(self):
+        chosen = sample([r["code"] for r in self.issuers])
+        print(f"\n  Singapore .SI sample: {', '.join(c + '.SI' for c in chosen)}")
+        for code in chosen:
+            with self.subTest(code=f"{code}.SI"):
+                rc, out, err = run_script("fetch_sg_filings.py", f"{code}.SI")
+                assert_no_traceback(self, code, out, err)
+                blocked = environment_block(out, err)
+                if blocked:
+                    self.skipTest(f"{code}.SI: {blocked}")
+                self.assertEqual(rc, 0, f"{code}.SI: exited {rc}")
+                self.assertTrue(out.splitlines()[0].startswith(code))
+
+    def test_ten_issuer_names_resolve_to_a_code(self):
+        chosen = sample(self.issuers)
+        print(f"\n  Singapore name sample: "
+              f"{', '.join(r['name'] for r in chosen)}")
+        for row in chosen:
+            with self.subTest(company=row["name"]):
+                rc, out, err = run_script("fetch_sg_filings.py", row["name"])
+                assert_no_traceback(self, row["name"], out, err)
+                blocked = environment_block(out, err)
+                if blocked:
+                    self.skipTest(f"{row['name']}: {blocked}")
+                self.assertEqual(rc, 0, f"{row['name']}: exited {rc}")
+                self.assertNotIn("No SGX-listed security matches", out)
+                codes = [ln.split()[0] for ln in out.splitlines()
+                         if ln[:1].isalnum()]
+                self.assertIn(row["code"], codes,
+                              f"{row['name']} did not surface {row['code']}")
+
+    def test_a_nonexistent_code_says_so_instead_of_guessing(self):
+        rc, out, err = run_script("fetch_sg_filings.py", "ZZ99")
+        assert_no_traceback(self, "ZZ99", out, err)
+        if environment_block(out, err):
+            self.skipTest("SGX unreachable")
+        self.assertEqual(rc, 0)
+        self.assertIn("No SGX-listed security matches", out)
+
+    def test_a_real_announcement_yields_its_metadata_and_every_document(self):
+        # The half that is scripted past discovery. Asserting the count is
+        # the point: taking only the first attachment would drop DBS's
+        # Letter to Shareholders and still look like a success.
+        rc, out, err = run_script("fetch_sg_filings.py", "D05",
+                                  "--announcement", SG_ANNOUNCEMENT)
+        assert_no_traceback(self, SG_ANNOUNCEMENT, out, err)
+        blocked = environment_block(out, err)
+        if blocked:
+            self.skipTest(f"SGXNet: {blocked}")
+        self.assertEqual(rc, 0, f"exited {rc}\n{err[-400:]}")
+        for expected in ("DBS GROUP HOLDINGS LTD", "Annual Report",
+                         "31/12/2025", "877753"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, out)
+        self.assertNotIn("WARNING", out, "issuer wrongly reported as a mismatch")
+        listed = [ln for ln in out.splitlines()
+                  if ln.strip().startswith(("877753", "877754"))]
+        self.assertEqual(len(listed), 2, f"expected 2 attachments:\n{out}")
+
+    def test_a_pasted_id_from_another_issuer_is_flagged(self):
+        # SoftBank Group lists only debt on SGX, so its announcement has
+        # no trading code at all -- the case that once filed its annual
+        # report under the code on the command line.
+        rc, out, err = run_script("fetch_sg_filings.py", "O39",
+                                  "--announcement", "3EFY7OL9UR6RG9PA")
+        assert_no_traceback(self, "3EFY7OL9UR6RG9PA", out, err)
+        blocked = environment_block(out, err)
+        if blocked:
+            self.skipTest(f"SGXNet: {blocked}")
+        self.assertEqual(rc, 0)
+        self.assertIn("SOFTBANK GROUP CORP.", out)
+        self.assertIn("WARNING", out)
+
+    def test_a_malformed_announcement_id_is_refused_readably(self):
+        rc, out, err = run_script("fetch_sg_filings.py", "D05",
+                                  "--announcement", "not-an-id")
+        assert_no_traceback(self, "not-an-id", out, err)
+        self.assertIn("16", out + err)
 
 
 class FrankfurtTest(unittest.TestCase):

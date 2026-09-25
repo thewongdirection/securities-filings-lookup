@@ -12,6 +12,7 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇹🇼 Taiwan | MOPS / doc.twse.com.tw | 年報 (annual reports), financial reports |
 | 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
 | 🇯🇵 Japan | TDnet (+ EDINET pointers) | 決算短信 (earnings), timely disclosures |
+| 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements |
 | 🇩🇪 Frankfurt / Germany | Unternehmensregister / IR sites | Annual reports (documented workflow, no scraper) |
 
 For cross-listed companies the skill retrieves every covered venue's filings and says what it can't reach. Venue quirks are documented per market: modern UK annual reports are ESEF zip packages (xHTML/iXBRL), Japan's EDINET API needs a free subscription key (TDnet is keyless but keeps only ~1 month), and Germany's official repositories are browse-only so the IR-site annual report or a SEC 20-F (SAP) is the practical route.
@@ -97,6 +98,9 @@ disclosure2.edinet-fsa.go.jp
 www.jpx.co.jp
 data.fca.org.uk
 api.data.fca.org.uk
+api.sgx.com
+www.sgx.com
+links.sgx.com
 ```
 <!-- egress-hosts:end -->
 
@@ -108,6 +112,7 @@ api.data.fca.org.uk
 | 🇹🇼 Taiwan | `doc.twse.com.tw`, `mops.twse.com.tw`, `openapi.twse.com.tw` | filing server, MOPS, the company directory used for name resolution |
 | 🇯🇵 Japan | `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp` | TDnet disclosures, EDINET API and web UI, JPX company list |
 | 🇬🇧 London | `data.fca.org.uk`, `api.data.fca.org.uk` | NSM document downloads and the search API |
+| 🇸🇬 Singapore | `api.sgx.com`, `www.sgx.com`, `links.sgx.com` | securities directory, the announcements browse page, SGXNet announcement pages and documents |
 
 Add these too if you use the Frankfurt / Germany route, which is a browse-and-IR-site workflow rather than an API:
 

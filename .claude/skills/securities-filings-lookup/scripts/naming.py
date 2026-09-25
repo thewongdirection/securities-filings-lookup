@@ -36,21 +36,34 @@ def safe_filename(text: str, limit: int = 70) -> str:
     return cleaned[:limit].strip() or "document"
 
 
+def _fragment(text: str, limit: int) -> str:
+    """A sanitized name fragment, or "" when there was nothing to sanitize.
+
+    `safe_filename` falls back to "document" so that it alone can name a
+    file. Applied per fragment that fallback is wrong: a venue with no
+    date for a document -- SGXNet serves plenty -- got
+    `C52_Annual Report 2025_document_880529.pdf`, with the fallback sat
+    in the date's place as if it meant something.
+    """
+    return safe_filename(text, limit) if (text or "").strip() else ""
+
+
 def filing_name(identifier: str, label: str, date: str,
                 extra: str | None = None, ext: str = ".pdf") -> str:
     """`{IDENTIFIER}_{LABEL}_{DATE}[_{EXTRA}]{ext}`.
 
     identifier: ticker or exchange code. label: form type, document
     kind, or headline. extra: disambiguator, when two documents would
-    otherwise share a name.
+    otherwise share a name. Empty parts are left out rather than filled
+    in, so a missing date shortens the name instead of inventing one.
     """
-    parts = [safe_filename(identifier.upper(), 20), safe_filename(label),
-             safe_filename(date, 12)]
+    parts = [_fragment((identifier or "").upper(), 20), _fragment(label, 70),
+             _fragment(date, 12)]
     if extra:
-        parts.append(safe_filename(extra, 30))
+        parts.append(_fragment(extra, 30))
     if not ext.startswith("."):
         ext = "." + ext
-    return "_".join(p for p in parts if p) + ext
+    return ("_".join(p for p in parts if p) or "document") + ext
 
 
 def claim_name(used: set[str], name: str, disambiguator: str) -> str:

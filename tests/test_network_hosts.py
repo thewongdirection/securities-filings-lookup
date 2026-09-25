@@ -57,7 +57,18 @@ EXEMPT = {
 # Domains sec_identity names in order to REJECT them as fake contacts.
 # Scoped to that module: exempting them everywhere would hide a future
 # venue script that really did fetch from company.com.
-PER_FILE_EXEMPT = {"sec_identity.py": set(sec_identity.PLACEHOLDER_DOMAINS)}
+PER_FILE_EXEMPT = {
+    "sec_identity.py": set(sec_identity.PLACEHOLDER_DOMAINS),
+    # singapore.md names these to say they are NOT retrieval routes:
+    # api2.sgx.com answers but serves none of SGXNet's paths, ACRA's
+    # documents are paid and per-request, and the three IR hosts are
+    # called out as deliberately off the allowlist. Scoped to that file,
+    # so a script that really did fetch ocbc.com still fails this test.
+    "singapore.md": {"api2.sgx.com", "acra.gov.sg",
+                     "dbs.com", "www.dbs.com",
+                     "ocbc.com", "www.ocbc.com",
+                     "comfortdelgro.com", "www.comfortdelgro.com"},
+}
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 
@@ -91,17 +102,25 @@ def optional_hosts() -> set[str]:
 
 
 def hosts_in(path: Path) -> set[str]:
-    text = path.read_text(encoding="utf-8")
+    return hosts_in_text(path.read_text(encoding="utf-8"),
+                         PER_FILE_EXEMPT.get(path.name, set()))
+
+
+def hosts_in_text(text: str, extra_exempt: set[str] | None = None) -> set[str]:
     found = set()
     for match in URL_RE.finditer(text):
         # Prose runs URLs into punctuation: "...api.edinet-fsa.go.jp," and
         # "(https://example/x)." both have to resolve to the bare host.
         host = urlsplit(match.group(0).rstrip(".,;:)")).hostname
-        if host:
+        # f-string URLs put the host in a placeholder -- f"https://
+        # {DOCUMENT_HOST}/FileOpen/..." -- and "{document_host" is not a
+        # host anyone can allowlist. The constant itself is scanned where
+        # it is defined.
+        if host and "{" not in host and "}" not in host:
             found.add(host)
     # An address like your-email@domain.com is not a host to allowlist.
     found |= set(BARE_HOST_RE.findall(EMAIL_RE.sub(" ", text)))
-    exempt = EXEMPT | PER_FILE_EXEMPT.get(path.name, set())
+    exempt = EXEMPT | (extra_exempt or set())
     return {h for h in found if h not in exempt}
 
 
@@ -153,7 +172,8 @@ class EgressAllowlistTest(unittest.TestCase):
                               ("Taiwan", "twse.com.tw"),
                               ("Japan", "tdnet.info"),
                               ("Japan (EDINET)", "edinet-fsa.go.jp"),
-                              ("London", "fca.org.uk")]:
+                              ("London", "fca.org.uk"),
+                              ("Singapore", "sgx.com")]:
             with self.subTest(venue=venue):
                 self.assertTrue(any(h.endswith(marker) for h in self.documented),
                                 f"no {venue} host documented")
@@ -186,6 +206,14 @@ class EgressAllowlistTest(unittest.TestCase):
     def test_email_addresses_are_not_hosts(self):
         self.assertEqual(
             BARE_HOST_RE.findall(EMAIL_RE.sub(" ", "Contact your-email@domain.com")), [])
+
+    def test_fstring_placeholders_are_not_mistaken_for_hosts(self):
+        # A hostname built from a constant reads as "{document_host}" in
+        # the source, which was reported as an undocumented host.
+        self.assertEqual(hosts_in_text('f"https://{DOCUMENT_HOST}/FileOpen/x"'),
+                         set())
+        self.assertEqual(hosts_in_text('"https://links.sgx.com/FileOpen/x"'),
+                         {"links.sgx.com"})
 
     def test_filenames_are_not_mistaken_for_hosts(self):
         for not_a_host in ("SKILL.md", "pdf_utils.py", "us-edgar.md", "10-K.htm"):

@@ -9,7 +9,7 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇺🇸 United States | SEC EDGAR | 10-K, 10-Q, 8-K, 20-F, 6-K, ARS, proxies |
 | 🇭🇰 Hong Kong | HKEXnews | Annual/interim reports, announcements |
 | 🇨🇳 Mainland China A-shares | CNINFO (SSE + SZSE) | 年度报告, 半年度报告, 季度报告, prospectuses |
-| 🇹🇼 Taiwan | MOPS / doc.twse.com.tw | 年報 (annual reports), financial reports |
+| 🇹🇼 Taiwan | MOPS / doc.twse.com.tw | 年報 (annual reports), financial reports — **needs a residential connection**, see below |
 | 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
 | 🇯🇵 Japan | TDnet (+ EDINET pointers) | 決算短信 (earnings), timely disclosures |
 | 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements |
@@ -109,10 +109,28 @@ links.sgx.com
 | 🇺🇸 United States | `sec.gov`, `www.sec.gov`, `data.sec.gov` | ticker→CIK map, submissions API, filing documents and exhibit indexes |
 | 🇨🇳 Mainland China | `www.cninfo.com.cn`, `static.cninfo.com.cn` | announcement search and the PDFs themselves |
 | 🇭🇰 Hong Kong | `www1.hkexnews.hk`, `www2.hkexnews.hk` | HKEXnews search, name lookup, documents |
-| 🇹🇼 Taiwan | `doc.twse.com.tw`, `mops.twse.com.tw`, `openapi.twse.com.tw` | filing server, MOPS, the company directory used for name resolution |
+| 🇹🇼 Taiwan | `doc.twse.com.tw`, `mops.twse.com.tw`, `openapi.twse.com.tw` | filing server, MOPS, the company directory used for name resolution — **allowlisting these is not enough**, see the note below |
 | 🇯🇵 Japan | `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp` | TDnet disclosures, EDINET API and web UI, JPX company list |
 | 🇬🇧 London | `data.fca.org.uk`, `api.data.fca.org.uk` | NSM document downloads and the search API |
 | 🇸🇬 Singapore | `api.sgx.com`, `www.sgx.com`, `links.sgx.com` | securities directory, the announcements browse page, SGXNet announcement pages and documents |
+
+### Taiwan does not work from a cloud container
+
+TWSE refuses datacentre IP addresses, and it does so on **every host it
+runs** — `doc.`, `mops.`, `openapi.`, `mopsov.`, `emops.` and
+`mopsfin.twse.com.tw` all answer HTTP 200 with the same block page
+(verified 2026-09). Because they answer rather than refuse the connection,
+this looks nothing like a missing allowlist entry, and no egress change
+fixes it: the filter is TWSE's, applied at their edge.
+
+The Taiwan scripts are not broken and are kept as they are — they work from
+a residential connection, which is how Claude Code and Claude Desktop
+normally run. In a cloud session the live test suite probes TWSE once,
+skips, and says why, instead of sampling 25 issuers and reporting 25
+refusals. The hosts stay in the list above because they are needed wherever
+the venue does work. `references/taiwan.md` records what was measured, the
+routes that were checked and ruled out, and the manual MOPS route to offer
+instead.
 
 Add these too if you use the Frankfurt / Germany route, which is a browse-and-IR-site workflow rather than an API:
 

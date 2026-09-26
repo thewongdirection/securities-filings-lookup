@@ -23,7 +23,7 @@ README = ROOT / "README.md"
 
 import sec_identity  # noqa: E402
 
-URL_RE = re.compile(r"https?://[^\s'\"`)>\]}|]+")
+URL_RE = re.compile(r"https?://[^\s'\"`)>\]}|*]+")
 HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
 # Reference docs name some hosts without a scheme -- references/frankfurt.md
@@ -64,6 +64,14 @@ PER_FILE_EXEMPT = {
     # documents are paid and per-request, and the three IR hosts are
     # called out as deliberately off the allowlist. Scoped to that file,
     # so a script that really did fetch ocbc.com still fails this test.
+    # taiwan.md names these to record that they were MEASURED AND REFUSE,
+    # or checked and ruled out -- the skill never fetches any of them. The
+    # three TWSE hosts it does use (doc./mops./openapi.) stay documented in
+    # README, because the venue works on networks TWSE accepts.
+    "taiwan.md": {"mopsov.twse.com.tw", "emops.twse.com.tw",
+                  "mopsfin.twse.com.tw", "data.gov.tw",
+                  "quality.data.gov.tw", "www.tpex.org.tw",
+                  "openapi.tpex.org.tw", "tpex.org.tw"},
     "singapore.md": {"api2.sgx.com", "acra.gov.sg",
                      "dbs.com", "www.dbs.com",
                      "ocbc.com", "www.ocbc.com",
@@ -214,6 +222,12 @@ class EgressAllowlistTest(unittest.TestCase):
                          set())
         self.assertEqual(hosts_in_text('"https://links.sgx.com/FileOpen/x"'),
                          {"links.sgx.com"})
+
+    def test_markdown_emphasis_is_not_part_of_a_hostname(self):
+        # A bolded URL in prose yielded "mops.twse.com.tw**", which would
+        # report a documented host as undocumented under a mangled name.
+        self.assertEqual(hosts_in_text("see **https://mops.twse.com.tw** now"),
+                         {"mops.twse.com.tw"})
 
     def test_filenames_are_not_mistaken_for_hosts(self):
         for not_a_host in ("SKILL.md", "pdf_utils.py", "us-edgar.md", "10-K.htm"):

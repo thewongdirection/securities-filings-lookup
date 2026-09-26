@@ -269,6 +269,44 @@ class ChinaTest(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
 class TaiwanTest(unittest.TestCase):
+    """Taiwan is unreachable from cloud sessions, and one request settles it.
+
+    TWSE applies its datacentre-IP filter at the edge across every host it
+    runs: doc., mops., openapi., mopsov., emops. and mopsfin.twse.com.tw all
+    answer HTTP 200 with the same 800-byte "FOR SECURITY REASONS" page
+    (verified 2026-09). So sampling 25 issuers here only produced 25
+    identical refusals and 25 pointless requests at a regulator that had
+    already said no.
+
+    This probes once instead. Where TWSE refuses, the class skips with the
+    reason; where it does not -- a residential connection, which is the
+    environment this venue is supported in -- the full sample runs exactly
+    as before. Nothing about the Taiwan code is disabled: it is the network
+    that is unsupported, not the venue.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import urllib.error
+
+        import fetch_tw_filings
+        import net_errors
+        try:
+            # The real code path, so the probe cannot disagree with the
+            # fetcher about what a refusal looks like.
+            fetch_tw_filings._post({"step": "1", "co_id": "2330",
+                                    "year": "115", "mtype": "F",
+                                    "dtype": "F04"})
+        except net_errors.HostRefused as exc:
+            raise unittest.SkipTest(
+                "TWSE refuses this network on every one of its hosts -- see "
+                f"references/taiwan.md. Taiwan needs a connection TWSE "
+                f"accepts ({str(exc)[:60]}...)") from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise unittest.SkipTest(
+                f"doc.twse.com.tw unreachable from this environment: {exc}"
+            ) from exc
+
     def test_issuers_either_list_filings_or_report_the_refusal(self):
         chosen = sample(TW_POOL)
         print(f"\n  Taiwan sample: {', '.join(chosen)}")

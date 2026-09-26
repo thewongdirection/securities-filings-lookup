@@ -2,6 +2,67 @@
 
 Primary source: **MOPS** (Market Observation Post System, `mops.twse.com.tw`), Taiwan's designated disclosure platform covering both TWSE-listed and TPEx (OTC) companies. The actual document repository behind it is **`doc.twse.com.tw`**, which is what the bundled script talks to.
 
+## Status: unreachable from cloud sessions
+
+**TWSE refuses datacentre IP addresses, on every host it runs.** Measured
+2026-09 — each of these answers HTTP 200 with the same 800-byte page,
+`FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED` / `為安全性考量`:
+
+| Host | What it serves |
+|---|---|
+| `doc.twse.com.tw` | the document repository this script uses |
+| `mops.twse.com.tw` | MOPS (the optimised site) |
+| `openapi.twse.com.tw` | the company directory used for name resolution |
+| `mopsov.twse.com.tw` | MOPS (the legacy deployment kept alongside it) |
+| `emops.twse.com.tw` | the English MOPS |
+| `mopsfin.twse.com.tw` | open data, including `t187ap03_L.csv` |
+
+So the filter is **IP-wide at TWSE's edge, not configured per host**: there
+is no other TWSE hostname left to try, and a 403 here is TWSE's decision
+rather than a missing egress rule. Headers, a browser User-Agent, a
+`Referer` and a session cookie were all tried and make no difference; do
+not try to defeat the filter, since it is an access control TWSE put up
+deliberately rather than a quirk to work around.
+
+**None of this means the Taiwan code is broken.** It is the network that is
+unsupported. From a connection TWSE accepts — a residential line, or Claude
+Code / Claude Desktop on a normal machine — `fetch_tw_filings.py` works as
+documented below, and the live test suite runs the full Taiwan sample there.
+In a cloud container it probes once, skips, and says why.
+
+### Routes that were checked and do not help
+
+- **`data.gov.tw`** (Taiwan's government open-data portal) is reachable and
+  carries the listed-company dataset (`18419`, from the FSC's Securities and
+  Futures Bureau) — but only as a **catalogue**. Its resource URL points
+  straight back at `mopsfin.twse.com.tw`, so the data itself is still behind
+  TWSE's filter.
+- **`quality.data.gov.tw`**, the portal's own cached copy
+  (`dq_download_json.php?nid=18419&md5_url=<token>`), is served from
+  government infrastructure and so should be outside TWSE's filter. It was
+  never tested — it needs its own egress entry, and `data.gov.tw` does not
+  cover the subdomain. If Taiwan name resolution is ever wanted from a cloud
+  session, that is the one lead worth following; read the current `md5_url`
+  off the `data.gov.tw` dataset page rather than hardcoding it, since the
+  token is tied to the resource version. It would restore name resolution
+  only — the annual reports themselves live on `doc.twse.com.tw`.
+- **TPEx** (`www.tpex.org.tw`, `openapi.tpex.org.tw`) is a separate operator
+  and might not be filtered, but it covers OTC (上櫃) issuers, not the
+  TWSE main board that Taiwanese requests are usually about.
+
+### What to do when TWSE refuses
+
+Say so plainly and hand over the manual route — do not report "no filings
+found", which is the wrong answer this venue's work exists to prevent:
+
+1. Open **https://mops.twse.com.tw** in a browser (English: e-Search >
+   annual reports) and search the 4-digit code.
+2. Or go to the company's own investor-relations site. Large Taiwanese
+   exporters (TSMC, MediaTek, Delta) publish an official **English** annual
+   report there, which is often what the user actually wants.
+3. For a dual-listed name, the US ADR's 20-F on EDGAR is in English and
+   fully reachable — TSMC files one as `TSM`.
+
 ## Ticker format
 
 4-digit codes (TSMC = 2330, MediaTek = 2454). Suffixes: `.TW` (TWSE main board), `.TWO` (TPEx). **A bare 4-digit code is ambiguous with Hong Kong** — the classifier assumes HK and flags the ambiguity; confirm which market the user means.

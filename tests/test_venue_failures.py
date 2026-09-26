@@ -445,6 +445,64 @@ class TaiwanDirectoryRefusalTest(unittest.TestCase):
         self.assertEqual(stored, [])
 
 
+class TaiwanUnsupportedNetworkTest(unittest.TestCase):
+    """Taiwan's code is kept and works from a residential connection, but
+    TWSE refuses datacentre IPs on every host, so the docs have to say that
+    plainly -- otherwise a cloud user reads "403" as an egress gap and keeps
+    adding allowlist entries that cannot help."""
+
+    def test_the_reference_records_that_every_twse_host_refuses(self):
+        text = (ROOT / "references" / "taiwan.md").read_text(encoding="utf-8")
+        # Each host has to appear as a row of the measured-hosts table, not
+        # merely somewhere in the file: several are also named in the prose
+        # about routes that were ruled out, so a plain substring check
+        # passed even with a row deleted.
+        rows = [ln for ln in text.splitlines()
+                if ln.startswith("| `") and "twse.com.tw`" in ln]
+        listed = {ln.split("`")[1] for ln in rows}
+        for host in ("doc.twse.com.tw", "mops.twse.com.tw",
+                     "openapi.twse.com.tw", "mopsov.twse.com.tw",
+                     "emops.twse.com.tw", "mopsfin.twse.com.tw"):
+            with self.subTest(host=host):
+                self.assertIn(host, listed,
+                              "not a row of the measured-hosts table")
+        self.assertIn("IP-wide", text)
+
+    def test_the_reference_says_the_code_is_not_the_problem(self):
+        text = (ROOT / "references" / "taiwan.md").read_text(encoding="utf-8")
+        self.assertIn("It is the network that is", text)
+        self.assertIn("residential", text)
+
+    def test_the_reference_gives_the_manual_route(self):
+        text = (ROOT / "references" / "taiwan.md").read_text(encoding="utf-8")
+        for expected in ("mops.twse.com.tw", "investor-relations", "20-F"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, text)
+
+    def test_skill_md_marks_the_venue_unreachable_from_the_cloud(self):
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        row = [ln for ln in text.splitlines()
+               if ln.startswith("| Taiwan |")]
+        self.assertTrue(row, "SKILL.md has no Taiwan row in the venue table")
+        self.assertIn("unreachable from cloud sessions", row[0])
+
+    def test_the_readme_says_allowlisting_the_hosts_is_not_enough(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Taiwan does not work from a cloud container", text)
+        self.assertIn("no egress change\nfixes it", text)
+
+    def test_the_twse_hosts_stay_documented_for_networks_that_work(self):
+        # Removing them would make the venue undiscoverable on the networks
+        # where it does work, and test_network_hosts would fail anyway.
+        import re
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        block = re.search(r"<!--\s*egress-hosts:start\s*-->(.*?)"
+                          r"<!--\s*egress-hosts:end\s*-->", text, re.S)
+        self.assertIsNotNone(block, "README has no egress-hosts block")
+        hosts = [ln.strip() for ln in block.group(1).splitlines()]
+        self.assertIn("doc.twse.com.tw", hosts)
+
+
 class JapanDirectoryTest(unittest.TestCase):
     """JPX moved the list to .xlsx, which xlrd 2.x cannot read at all; the
     old .xls URL 404s, and that was hidden behind a "pip install xlrd"

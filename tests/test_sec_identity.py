@@ -234,7 +234,7 @@ class CallerWiringTest(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertTrue(save_filing.is_sec(url))
         for url in ("http://static.cninfo.com.cn/x.PDF",
-                    "https://doc.twse.com.tw/x.pdf",
+                    "https://links.sgx.com/FileOpen/x.ashx",
                     "https://notsec.gov.example.test/x"):
             with self.subTest(url=url):
                 self.assertFalse(save_filing.is_sec(url))

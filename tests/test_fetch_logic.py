@@ -25,7 +25,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import fetch_cn_filings  # noqa: E402
 import fetch_jp_filings  # noqa: E402
-import fetch_tw_filings  # noqa: E402
 import fetch_us_filings  # noqa: E402
 import net_errors  # noqa: E402
 import pdf_utils  # noqa: E402
@@ -133,44 +132,6 @@ class CnFilingSelectionTest(unittest.TestCase):
         self.assertEqual(fetch_cn_filings.classify_exchange("000001"), ("sz", "szse"))
         with self.assertRaises(SystemExit):
             fetch_cn_filings.classify_exchange("830799")  # Beijing, unsupported
-
-
-TW_LISTING = (
-    '<a href="javascript:readfile2("F","2330","202503_2330_AI1.pdf")">'
-    '<a href="javascript:readfile2("F","2330","202503_2330_AI2.pdf")">'
-)
-
-
-class TwFilingSelectionTest(unittest.TestCase):
-    def test_roc_year_conversion_for_annual_reports(self):
-        captured = {}
-
-        def fake_post(payload):
-            # _post decodes and block-checks internally, so it hands back text.
-            captured.update(payload)
-            return TW_LISTING
-
-        with mock.patch.object(fetch_tw_filings, "_post", fake_post):
-            files = fetch_tw_filings.list_files("2330", 2025, "annual")
-
-        # FY2025's annual report is published in 2026 = ROC 115.
-        self.assertEqual(captured["year"], "115")
-        self.assertEqual(captured["dtype"], "F04")
-        self.assertEqual([f[2] for f in files],
-                         ["202503_2330_AI1.pdf", "202503_2330_AI2.pdf"])
-
-    def test_financial_reports_use_their_own_year_and_type(self):
-        captured = {}
-
-        def fake_post(payload):
-            captured.update(payload)
-            return ""
-
-        with mock.patch.object(fetch_tw_filings, "_post", fake_post):
-            fetch_tw_filings.list_files("2330", 2025, "financial")
-
-        self.assertEqual(captured["year"], "114")  # 2025 - 1911
-        self.assertEqual(captured["mtype"], "A")
 
 
 TDNET_PAGE = """

@@ -7,7 +7,7 @@ candidate: venue, ticker/code, and the official name matched.
 Usage:
     python resolve_name.py "Tencent"
     python resolve_name.py "Berkshire Hathaway"
-    python resolve_name.py "TSMC" --venues us,tw
+    python resolve_name.py "Tencent" --venues us,hk
 
 Sources (all free, official):
 - US:      SEC's company_tickers.json (shares fetch_us_filings.py's
@@ -15,8 +15,6 @@ Sources (all free, official):
 - HK:      HKEXnews prefix.do name lookup
 - China:   CNINFO topSearch (matches Chinese names/pinyin; English
            names usually don't match -- expect misses for English input)
-- Taiwan:  TWSE OpenAPI t187ap03_L company directory (Chinese names +
-           English abbreviations; TWSE main board only)
 - London:  FCA NSM search, distinct company values from recent hits
 
 A name can legitimately resolve in several venues at once (TSMC ->
@@ -70,14 +68,13 @@ def _post(url: str, data: bytes, content_type: str, timeout: int = 30) -> bytes:
 
 
 def _cached_json(cache_name: str, url: str, ttl: int = 86400,
-                 user_agent=None, inspect=None):
+                 user_agent=None):
     """Cached JSON fetch. `user_agent` may be a callable, resolved only on
     a cache miss -- SEC needs a declared contact to make a request, not to
-    read yesterday's answer off disk. `inspect` gets the raw bytes before
-    they are parsed, for venues that refuse with an HTTP 200 page.
+    read yesterday's answer off disk.
 
-    Nothing is cached until it parses, so a refusal never lands on disk to
-    be re-read for a day.
+    Nothing is cached until it parses, so a directory that answers with an
+    HTML refusal never lands on disk to be re-read for a day.
     """
     cache = disk_cache.cache_path(cache_name)
     try:
@@ -87,8 +84,6 @@ def _cached_json(cache_name: str, url: str, ttl: int = 86400,
     except (OSError, json.JSONDecodeError):
         pass
     raw = _get(url, user_agent=user_agent() if callable(user_agent) else user_agent)
-    if inspect is not None:
-        inspect(raw)
     try:
         data = json.loads(raw.decode())
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -147,35 +142,6 @@ def search_cn(q: str) -> list[tuple[str, str, str]]:
         return [("cn", "ERROR", str(e))]
     return [("cn", e["code"], e.get("zwjc", "?")) for e in entries[:8]
             if e.get("category") == "A股"]
-
-
-TWSE_DIRECTORY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
-
-
-def _twse_not_blocked(raw: bytes) -> None:
-    """openapi.twse.com.tw serves the same HTTP-200 refusal as the document
-    server, so the company directory has to recognise it too."""
-    from fetch_tw_filings import is_blocked, refusal
-
-    if is_blocked(raw.decode("utf-8", errors="replace")):
-        raise refusal("openapi.twse.com.tw")
-
-
-def search_tw(q: str) -> list[tuple[str, str, str]]:
-    ql = q.lower()
-    try:
-        data = _cached_json("twse_companies.json", TWSE_DIRECTORY_URL,
-                            inspect=_twse_not_blocked)
-    except Exception as e:  # noqa: BLE001 - one venue failing is not fatal
-        return [("tw", "ERROR", str(e))]
-    out = []
-    for c in data:
-        names = " ".join([c.get("公司名稱", ""), c.get("公司簡稱", ""),
-                          c.get("英文簡稱", "")])
-        if ql in names.lower():
-            out.append(("tw", c["公司代號"] + ".TW",
-                        f"{c.get('公司簡稱','?')} / {c.get('英文簡稱','?')}"))
-    return out[:8]
 
 
 # JPX moved this list from .xls to .xlsx, which also changed which reader
@@ -276,15 +242,14 @@ def search_sg(q: str) -> list[tuple[str, str, str]]:
 
 
 VENUES = {"us": search_us, "hk": search_hk, "cn": search_cn,
-          "tw": search_tw, "uk": search_uk, "jp": search_jp,
-          "sg": search_sg}
+          "uk": search_uk, "jp": search_jp, "sg": search_sg}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name", help="Company name (or fragment) to resolve")
-    parser.add_argument("--venues", default="us,hk,cn,tw,uk,jp,sg",
-                        help="Comma-separated subset of us,hk,cn,tw,uk,jp,sg "
+    parser.add_argument("--venues", default="us,hk,cn,uk,jp,sg",
+                        help="Comma-separated subset of us,hk,cn,uk,jp,sg "
                              "(no directory exists for Germany -- web search)")
     parser.add_argument("--user-agent",
                         help="Contact for SEC's fair-access policy, e.g. "

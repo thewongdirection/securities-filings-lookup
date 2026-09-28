@@ -25,8 +25,6 @@ SUFFIX_MAP = {
     ".SZ": "shenzhen",
     ".SSE": "shanghai",
     ".SZSE": "shenzhen",
-    ".TW": "taiwan",
-    ".TWO": "taiwan",  # TPEx (Taiwan OTC board)
     ".L": "london",
     ".LON": "london",
     ".T": "tokyo",
@@ -34,6 +32,27 @@ SUFFIX_MAP = {
     ".F": "frankfurt",
     ".SI": "singapore",
     ".SGX": "singapore",
+}
+
+# Suffixes that name a real venue this skill does not cover. Recognising
+# them beats falling through to "unknown": a .TW ticker is unambiguously
+# Taiwanese, and answering "could not classify -- try resolve_name.py" sends
+# the reader somewhere that cannot help. Say what it is and decline.
+UNSUPPORTED_SUFFIX_MAP = {
+    ".TW": ("Taiwan (TWSE)", "taiwan"),
+    ".TWO": ("Taiwan (TPEx, the OTC board)", "taiwan"),
+}
+
+UNSUPPORTED_NOTE = {
+    "taiwan": (
+        "This is a {market} listing, which this skill does not cover: TWSE "
+        "refuses automated clients from datacentre IP addresses on every "
+        "host it runs, so the venue could not be supported dependably. Use "
+        "MOPS in a browser (https://mops.twse.com.tw, English: e-Search > "
+        "annual reports), the company's own IR site -- large Taiwanese "
+        "exporters publish an official English annual report -- or the US "
+        "ADR's 20-F on EDGAR, which this skill does handle (TSMC files one "
+        "as TSM). See the Taiwan section of README.md."),
 }
 
 # SGX trading codes are three or four alphanumerics in every combination.
@@ -49,6 +68,11 @@ SGX_MIXED_CODE = re.compile(r"^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{3,4}$")
 def identify(raw: str) -> dict:
     t = raw.strip().upper()
 
+    for suffix, (market, key) in UNSUPPORTED_SUFFIX_MAP.items():
+        if t.endswith(suffix):
+            return _result(raw, "unsupported", t[: -len(suffix)],
+                           note=UNSUPPORTED_NOTE[key].format(market=market))
+
     for suffix, venue in SUFFIX_MAP.items():
         if t.endswith(suffix):
             code = t[: -len(suffix)]
@@ -57,15 +81,16 @@ def identify(raw: str) -> dict:
             return _result(raw, venue, code)
 
     # Bare numeric: HK codes are short (commonly 1-5 digits, zero-padded
-    # to 5 in URLs); mainland A-share codes are exactly 6 digits. Taiwan
+    # to 5 in URLs); mainland A-share codes are exactly 6 digits. Tokyo
     # codes are 4 digits, so bare 4-digit input is genuinely ambiguous.
     if re.fullmatch(r"\d{1,5}", t):
         note = None
         if len(t) == 4:
-            note = ("Assumed Hong Kong; 4-digit codes are also the Taiwan "
-                    "(2330 = TSMC) and Tokyo (7203 = Toyota) formats. If the "
-                    "company is Taiwanese or Japanese, use the .TW / .T "
-                    "suffix or confirm with a search.")
+            note = ("Assumed Hong Kong; 4-digit codes are also the Tokyo "
+                    "format (7203 = Toyota), and Taiwan's (2330 = TSMC), "
+                    "which this skill no longer covers. If the company is "
+                    "Japanese use the .T suffix; if Taiwanese, see the "
+                    "Taiwan note in README.md.")
         elif len(t) == 3:
             note = ("Assumed Hong Kong; 27 SGX trading codes are also bare "
                     "digits (533 = ABR in Singapore). Use .SI if you mean "

@@ -9,7 +9,6 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇺🇸 United States | SEC EDGAR | 10-K, 10-Q, 8-K, 20-F, 6-K, ARS, proxies |
 | 🇭🇰 Hong Kong | HKEXnews | Annual/interim reports, announcements |
 | 🇨🇳 Mainland China A-shares | CNINFO (SSE + SZSE) | 年度报告, 半年度报告, 季度报告, prospectuses |
-| 🇹🇼 Taiwan | MOPS / doc.twse.com.tw | 年報 (annual reports), financial reports — **needs a residential connection**, see below |
 | 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
 | 🇯🇵 Japan | TDnet (+ EDINET pointers) | 決算短信 (earnings), timely disclosures |
 | 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements |
@@ -71,7 +70,7 @@ Two consequences worth knowing:
   SEC's primary documents are HTML; the skill prints them to PDF with a real headless browser. HK and China filings are native PDFs and need nothing extra.
   Where a Chromium is already installed but Playwright pins a different build (Claude Code on the web), the scripts fall back to the browser under `PLAYWRIGHT_BROWSERS_PATH`; `SKILL_CHROMIUM_PATH` forces a specific binary.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
-- **For Taiwan filings** (and some IR-site downloads): `pip install certifi` — several issuers' TLS chains are missing from default trust stores; the scripts pick up certifi automatically.
+- **For issuers whose TLS chain is incomplete** (various IR-site downloads): `pip install certifi` — some hosts' chains are missing from default trust stores; the scripts pick up certifi automatically.
 - **For Japan name lookup**: `pip install openpyxl` (JPX's company directory is an .xlsx; it used to be .xls, and that URL now 404s). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
 
 ## Network access (cloud containers, proxies, locked-down networks)
@@ -89,9 +88,6 @@ www.cninfo.com.cn
 static.cninfo.com.cn
 www1.hkexnews.hk
 www2.hkexnews.hk
-doc.twse.com.tw
-mops.twse.com.tw
-openapi.twse.com.tw
 www.release.tdnet.info
 api.edinet-fsa.go.jp
 disclosure2.edinet-fsa.go.jp
@@ -109,28 +105,42 @@ links.sgx.com
 | 🇺🇸 United States | `sec.gov`, `www.sec.gov`, `data.sec.gov` | ticker→CIK map, submissions API, filing documents and exhibit indexes |
 | 🇨🇳 Mainland China | `www.cninfo.com.cn`, `static.cninfo.com.cn` | announcement search and the PDFs themselves |
 | 🇭🇰 Hong Kong | `www1.hkexnews.hk`, `www2.hkexnews.hk` | HKEXnews search, name lookup, documents |
-| 🇹🇼 Taiwan | `doc.twse.com.tw`, `mops.twse.com.tw`, `openapi.twse.com.tw` | filing server, MOPS, the company directory used for name resolution — **allowlisting these is not enough**, see the note below |
 | 🇯🇵 Japan | `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp` | TDnet disclosures, EDINET API and web UI, JPX company list |
 | 🇬🇧 London | `data.fca.org.uk`, `api.data.fca.org.uk` | NSM document downloads and the search API |
 | 🇸🇬 Singapore | `api.sgx.com`, `www.sgx.com`, `links.sgx.com` | securities directory, the announcements browse page, SGXNet announcement pages and documents |
 
-### Taiwan does not work from a cloud container
+### Taiwan (TWSE / MOPS) is not covered
 
-TWSE refuses datacentre IP addresses, and it does so on **every host it
-runs** — `doc.`, `mops.`, `openapi.`, `mopsov.`, `emops.` and
-`mopsfin.twse.com.tw` all answer HTTP 200 with the same block page
-(verified 2026-09). Because they answer rather than refuse the connection,
-this looks nothing like a missing allowlist entry, and no egress change
-fixes it: the filter is TWSE's, applied at their edge.
+Taiwan was supported and has been removed. TWSE refuses automated clients
+from datacentre IP addresses, and it does so on **every host it runs** —
+`doc.`, `mops.`, `openapi.`, `mopsov.`, `emops.` and `mopsfin.twse.com.tw`
+all answer HTTP 200 with the same 800-byte `FOR SECURITY REASONS, THIS PAGE
+CAN NOT BE ACCESSED` page (verified 2026-09). Because they answer rather
+than refuse the connection, it looks nothing like a missing allowlist entry,
+but no egress change fixes it: the filter is TWSE's, applied at their edge,
+and it is an access control rather than a quirk to work around.
 
-The Taiwan scripts are not broken and are kept as they are — they work from
-a residential connection, which is how Claude Code and Claude Desktop
-normally run. In a cloud session the live test suite probes TWSE once,
-skips, and says why, instead of sampling 25 issuers and reporting 25
-refusals. The hosts stay in the list above because they are needed wherever
-the venue does work. `references/taiwan.md` records what was measured, the
-routes that were checked and ruled out, and the manual MOPS route to offer
-instead.
+Routes checked and ruled out: **`data.gov.tw`** is reachable and lists the
+company directory (dataset `18419`, from the FSC's Securities and Futures
+Bureau) but only as a catalogue — its resource URL points back at
+`mopsfin.twse.com.tw`. **`quality.data.gov.tw`**, the portal's own cached
+copy, is served from government infrastructure and would plausibly work; it
+was never tested, needs its own allowlist entry, and would restore name
+resolution only, since the reports themselves live on `doc.twse.com.tw`.
+**TPEx** (`tpex.org.tw`) is a separate operator but covers OTC issuers
+rather than the main board.
+
+The code worked from a residential connection, so this is a deliberate scope
+decision rather than a broken venue: rather than ship a venue that fails in
+the environment this skill is mostly run in, it was removed. `git log
+-- references/taiwan.md scripts/fetch_tw_filings.py` has the full
+implementation and the measurements if it is ever worth reviving.
+
+**For a Taiwanese listing**, use MOPS in a browser
+(https://mops.twse.com.tw, English: e-Search > annual reports), the
+company's own IR site — large exporters publish an official English annual
+report — or the US ADR's 20-F on EDGAR, which this skill does handle (TSMC
+files one as `TSM`).
 
 Add these too if you use the Frankfurt / Germany route, which is a browse-and-IR-site workflow rather than an API:
 
@@ -148,7 +158,7 @@ That list is necessarily incomplete — German annual reports usually come from 
 
 claude.ai/code → the cloud icon showing the environment name (the row above the message box) → hover the environment → settings gear → **Network access** → **Custom** → paste the list into **Allowed domains**, one per line.
 
-Keep **Also include default list of common package managers** ticked: the optional `playwright`, `certifi`, `pypdf` and `openpyxl` installs come from PyPI. Wildcards work too (`*.cninfo.com.cn`, `*.twse.com.tw`, `*.hkexnews.hk`), though `api.data.fca.org.uk` is two levels deep so it is safer spelled out. **Full** network access covers everything without a list.
+Keep **Also include default list of common package managers** ticked: the optional `playwright`, `certifi`, `pypdf` and `openpyxl` installs come from PyPI. Wildcards work too (`*.cninfo.com.cn`, `*.hkexnews.hk`, `*.sgx.com`), though `api.data.fca.org.uk` is two levels deep so it is safer spelled out. **Full** network access covers everything without a list.
 
 Three things that catch people out:
 
@@ -166,7 +176,6 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup 0700.HK       # Hong Kong (also: 700, 9988.HK)
 /securities-filings-lookup 600519:SS     # Shanghai (also: 600519, 600519.SS)
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
-/securities-filings-lookup 2330.TW       # Taiwan (bare 2330 is assumed HK — use the suffix)
 /securities-filings-lookup AZN.L         # London
 /securities-filings-lookup 7203.T        # Tokyo
 /securities-filings-lookup SAP.DE        # Frankfurt / XETRA

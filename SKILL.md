@@ -1,6 +1,6 @@
 ---
 name: securities-filings-lookup
-description: Given a stock ticker or company name, determine which exchange or regulator it's listed under (US via SEC EDGAR, Hong Kong via HKEX, mainland China A-shares via CNINFO/SSE/SZSE, Taiwan via MOPS/TWSE, London via the FCA National Storage Mechanism, Japan via TDnet/EDINET, Singapore via SGX/SGXNet, or Frankfurt/Germany) and retrieve its official financial and securities filings (10-K, 10-Q, 8-K, 20-F, 6-K, annual reports, interim reports, prospectuses, ESEF packages). Use this whenever the user gives a ticker and asks for filings, annual/quarterly reports, regulatory disclosures, or "where can I find X's filings" — even if they don't name the exchange, don't say the word "filing," or just paste a ticker and ask to pull up or look up the company's reports. ALSO fire this at the START of any attempt to analyze, evaluate, or assess a stock/company's financial status, financial health, results, fundamentals, or performance — e.g. "how is AVGO doing financially", "analyze Microsoft's financials", "is NVDA profitable / how are its margins", "pull up Tesla's revenue / balance sheet / cash flow / income statement", "review the numbers on TICKER", "what do the fundamentals look like", "dig into X's earnings" — because the official 10-K/10-Q/20-F/annual report is the authoritative primary source for those figures; fetch the relevant filing first so the analysis is grounded in the real reported statements rather than memory or third-party summaries. This complements rather than replaces dashboard/screening skills — it supplies the underlying source documents they and you should reason from. Also use for dual-listed companies or ADRs (e.g. a US-listed Chinese ADR that also trades in Hong Kong), where filings may exist in more than one jurisdiction.
+description: Given a stock ticker or company name, determine which exchange or regulator it's listed under (US via SEC EDGAR, Hong Kong via HKEX, mainland China A-shares via CNINFO/SSE/SZSE, London via the FCA National Storage Mechanism, Japan via TDnet/EDINET, Singapore via SGX/SGXNet, or Frankfurt/Germany) and retrieve its official financial and securities filings (10-K, 10-Q, 8-K, 20-F, 6-K, annual reports, interim reports, prospectuses, ESEF packages). Use this whenever the user gives a ticker and asks for filings, annual/quarterly reports, regulatory disclosures, or "where can I find X's filings" — even if they don't name the exchange, don't say the word "filing," or just paste a ticker and ask to pull up or look up the company's reports. ALSO fire this at the START of any attempt to analyze, evaluate, or assess a stock/company's financial status, financial health, results, fundamentals, or performance — e.g. "how is AVGO doing financially", "analyze Microsoft's financials", "is NVDA profitable / how are its margins", "pull up Tesla's revenue / balance sheet / cash flow / income statement", "review the numbers on TICKER", "what do the fundamentals look like", "dig into X's earnings" — because the official 10-K/10-Q/20-F/annual report is the authoritative primary source for those figures; fetch the relevant filing first so the analysis is grounded in the real reported statements rather than memory or third-party summaries. This complements rather than replaces dashboard/screening skills — it supplies the underlying source documents they and you should reason from. Also use for dual-listed companies or ADRs (e.g. a US-listed Chinese ADR that also trades in Hong Kong), where filings may exist in more than one jurisdiction.
 ---
 
 # Securities Filings Lookup
@@ -22,11 +22,25 @@ Before any of that, it updates itself (Step 0) so the workflow, the reference do
 - **United States (SEC EDGAR)** — 10-K/10-Q/8-K for domestic filers, or 20-F/6-K for foreign private issuers (companies incorporated abroad that list in the US, including most Chinese ADRs).
 - **Hong Kong (HKEX / HKEXnews)** — Annual Report + Interim Report, plus a continuous stream of announcements (results, connected transactions, notifiable transactions). No mandatory quarterly reporting for most main-board issuers since 2019.
 - **Mainland China A-shares (CNINFO, covering SSE + SZSE)** — 年度报告 (annual report), 半年度报告 (interim report), and other disclosures, almost always Chinese-only.
-- **Taiwan (MOPS / doc.twse.com.tw)** — 年報 (shareholder-meeting annual report) and audited financial reports, Chinese; large exporters often publish official English annual reports separately. 4-digit codes, ambiguous with HK when bare. **Not reachable from a cloud session**: TWSE refuses datacentre IPs on every host it runs, so in Claude Code on the web this venue is a manual MOPS-in-a-browser route — say so and offer the company's English annual report or the US ADR's 20-F instead. It works normally from a residential connection. See `references/taiwan.md`.
 - **London (FCA National Storage Mechanism)** — annual reports (modern ones as ESEF zip packages, not PDFs), circulars, prospectuses; RNS is the news wire on top. English natively.
-- **Japan (TDnet + EDINET)** — 決算短信 (earnings) and timely disclosures on TDnet (keyless, ~1 month retention); 有価証券報告書 (annual securities reports) on EDINET, whose API needs a free key. Japanese; big ADRs (Toyota, Sony) file English 20-Fs with the SEC. 4-digit codes, three-way ambiguous with HK/Taiwan when bare.
+- **Japan (TDnet + EDINET)** — 決算短信 (earnings) and timely disclosures on TDnet (keyless, ~1 month retention); 有価証券報告書 (annual securities reports) on EDINET, whose API needs a free key. Japanese; big ADRs (Toyota, Sony) file English 20-Fs with the SEC. 4-digit codes, ambiguous with HK when bare.
 - **Singapore (SGX / SGXNet)** — Annual Report plus a half-year results announcement and a continuous SGXNet stream; like Hong Kong, no mandatory quarterly reporting for most issuers since 2020. English natively. Trading codes are three or four alphanumerics (`D05`, `Z74`, `A17U`), which overlap with US tickers and HK codes when bare — `.SI` removes the doubt. An annual report announcement usually carries several documents (the report plus a letter to shareholders or AGM circular), and SGX publishes no listing API, so finding *which* announcement is the one manual step.
 - **Frankfurt / Germany (Unternehmensregister / Bundesanzeiger)** — browse-only official sources; the pragmatic route is the company's IR-site annual report (usually official English) or the SEC 20-F for NYSE-listed names like SAP. No script.
+
+**Taiwan (TWSE / MOPS) is not covered.** Taiwan's disclosure system refuses
+automated clients from datacentre IP addresses on every host it runs, so the
+venue could not be supported dependably and its code was removed rather than
+left to fail. If a request resolves to a Taiwanese listing — a 4-digit code
+whose company turns out to be Taiwanese, or a `.TW` / `.TWO` suffix — say
+that plainly and offer the routes that do work:
+
+1. **MOPS in a browser** — https://mops.twse.com.tw (English: e-Search >
+   annual reports), searched by the 4-digit code.
+2. **The company's own investor-relations site**, where large Taiwanese
+   exporters (TSMC, MediaTek, Delta) publish an official *English* annual
+   report — often what the user actually wants.
+3. **The US ADR's 20-F on EDGAR**, in English and fully supported here —
+   TSMC files one as `TSM`.
 
 Guessing the wrong venue wastes time searching for filings that were never going to be there. Confirm first, then fetch.
 
@@ -71,7 +85,7 @@ If the input is a company name rather than a ticker (spaces, long words, no tick
 
 ```
 python scripts/resolve_name.py "Tencent"
-python scripts/resolve_name.py "TSMC" --venues us,tw
+python scripts/resolve_name.py "Tencent" --venues us,hk
 ```
 
 It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM, JPX's English company list for Japan) and prints candidates as `venue code name`. A venue that cannot answer returns an `ERROR` row and the others still report — the UK row currently always errors, because the FCA retired that search index. Germany has no public directory — resolve German names by web search. Then:
@@ -79,7 +93,7 @@ It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CN
 - **Confirm with the user before proceeding** (AskUserQuestion where available): list the plausible candidates with the closest match first and marked as the default. **If no answer arrives within ~15 seconds** or the session is non-interactive, **proceed with the closest match** — say so in the question and in your reply.
 - Filter obvious noise before asking: HK results include listed *notes/bonds* (names like "TENCENT N2801") — the plain equity is the short bare name; UK results may lack a symbol.
 - **Same name ≠ same company**: "Tencent" also surfaces Tencent Music (TME), a different issuer. Pick the closest match by name, not the first row.
-- **Acronyms can miss**: the matchers search official names, so "TSMC" finds 2330.TW but not the TSM ADR (EDGAR's legal name is "Taiwan Semiconductor Manufacturing"). If a well-known company gets few/odd hits, supplement with a quick web search before asking.
+- **Acronyms can miss**: the matchers search official names, so an acronym a company does not use legally may find nothing — "TSMC" does not match EDGAR's "Taiwan Semiconductor Manufacturing", whose ADR is `TSM`. If a well-known company gets few/odd hits, supplement with a quick web search before asking.
 - If nothing resolves anywhere, web-search "<name> stock ticker", then confirm.
 
 Once a ticker is confirmed (or defaulted), continue with the normal flow below — including the dual-listing question if the name resolved in several venues.
@@ -119,7 +133,6 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 | United States | `references/us-edgar.md` | `scripts/fetch_us_filings.py` |
 | Hong Kong | `references/hong-kong.md` | — (search/browse workflow; no clean public API) |
 | Mainland China A-shares | `references/china-a-shares.md` | `scripts/fetch_cn_filings.py` |
-| Taiwan | `references/taiwan.md` | `scripts/fetch_tw_filings.py` — **unreachable from cloud sessions**: TWSE refuses datacentre IPs with an HTTP-200 block page on *every* host (doc./mops./openapi./mopsov./emops./mopsfin., all verified). The script reports the refusal rather than "no filings"; hand over the manual route. Works from a residential connection |
 | London | `references/london.md` | `scripts/fetch_uk_filings.py` — **the FCA's NSM search index is retired (2026-09); the script reports that and the manual route**, see `references/london.md` |
 | Japan | `references/japan.md` | `scripts/fetch_jp_filings.py` (TDnet) |
 | Singapore | `references/singapore.md` | `scripts/fetch_sg_filings.py` — resolves the issuer and pulls any announcement's documents; **SGX publishes no listing API, so locating the announcement is manual** (browse UI or web search) |
@@ -131,7 +144,7 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 
 **Environment matters here.** The bundled scripts shell out to `data.sec.gov` / `cninfo.com.cn` directly, which only works where the shell actually has internet access to those domains (Claude Code, Claude Desktop). In claude.ai's sandboxed code execution, outbound network access is restricted to package registries and does **not** include these filing sources — in that environment, use the `web_search` and `web_fetch` tools instead and follow the same search-then-fetch steps described in each reference file. Try the script first if you're unsure which environment you're in; a network error tells you immediately to fall back to search+fetch.
 
-**A blocked host is a network policy, not a bug.** `403 Forbidden` on connect, or `Tunnel connection failed`, means the environment's egress allowlist doesn't include that regulator — the skill is fine and the other venues still work. Say which host was refused and point the user at the **Network access** section of `README.md`, which lists every host the skill needs (SEC: `sec.gov`, `www.sec.gov`, `data.sec.gov`; China: `www.cninfo.com.cn`, `static.cninfo.com.cn`; Hong Kong: `www1.hkexnews.hk`, `www2.hkexnews.hk`; Taiwan: `doc.twse.com.tw`, `mops.twse.com.tw`, `openapi.twse.com.tw`; Japan: `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp`; London: `data.fca.org.uk`, `api.data.fca.org.uk`; Singapore: `api.sgx.com`, `www.sgx.com`, `links.sgx.com`). Don't retry a blocked host in a loop, and don't route around it. **Taiwan is the one exception worth recognising**: `*.twse.com.tw` hosts are reachable and still refuse, answering HTTP 200 with a block page rather than failing to connect. That is TWSE declining the IP, not an allowlist gap, and no egress change fixes it.
+**A blocked host is a network policy, not a bug.** `403 Forbidden` on connect, or `Tunnel connection failed`, means the environment's egress allowlist doesn't include that regulator — the skill is fine and the other venues still work. Say which host was refused and point the user at the **Network access** section of `README.md`, which lists every host the skill needs (SEC: `sec.gov`, `www.sec.gov`, `data.sec.gov`; China: `www.cninfo.com.cn`, `static.cninfo.com.cn`; Hong Kong: `www1.hkexnews.hk`, `www2.hkexnews.hk`; Japan: `www.release.tdnet.info`, `api.edinet-fsa.go.jp`, `disclosure2.edinet-fsa.go.jp`, `www.jpx.co.jp`; London: `data.fca.org.uk`, `api.data.fca.org.uk`; Singapore: `api.sgx.com`, `www.sgx.com`, `links.sgx.com`). Don't retry a blocked host in a loop, and don't route around it.
 
 ## Step 3 — Save and deliver the original filing as a PDF
 
@@ -139,7 +152,7 @@ Route to the matching reference file for the exact mechanics, URL patterns, and 
 
 Save the actual document — not a reconstruction of its content. All venues route through `scripts/pdf_utils.py`, which does exactly one of two things:
 
-- **Already a PDF** (true for essentially all Hong Kong, mainland China, and Taiwan filings, and some SEC exhibits): the raw bytes are saved unmodified. Byte-for-byte identical to the source — this was tested by downloading a file and comparing it to the original with `cmp`.
+- **Already a PDF** (true for essentially all Hong Kong, mainland China and Singapore filings, and some SEC exhibits): the raw bytes are saved unmodified. Byte-for-byte identical to the source — this was tested by downloading a file and comparing it to the original with `cmp`.
 - **UK ESEF packages are ZIPs, not PDFs** — the officially filed modern UK annual report is a zip containing the xHTML/iXBRL report. Save the zip as-is (it IS the original); to let the user read it, extract `reports/*.html`, or offer the glossy PDF from the company's IR site labelled as the secondary source. See `references/london.md`.
 - **HTML** (the normal case for SEC EDGAR primary documents): a real headless browser (Playwright + Chromium) renders the actual page and prints it to PDF — the same output as opening the page in Chrome and choosing Print > Save as PDF. Nothing about the content is parsed, reorganized, or rebuilt; the browser renders the real HTML/CSS as authored, so tables, fonts, and layout match the original.
 

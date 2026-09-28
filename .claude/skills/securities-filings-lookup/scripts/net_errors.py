@@ -52,7 +52,6 @@ HOST_NOTES = {
     "sec.gov": ("SEC enforces a fair-access limit and has been observed "
                 "returning sustained 429s to shared cloud IPs."),
     "cninfo.com.cn": "CNINFO's endpoints are undocumented and add anti-bot friction without notice.",
-    "doc.twse.com.tw": "TWSE's document server is reachable only from networks it accepts.",
     "release.tdnet.info": "TDnet serves only the last ~1 month and blocks unusual clients.",
     "api.edinet-fsa.go.jp": "EDINET needs a free API key in EDINET_API_KEY.",
 }

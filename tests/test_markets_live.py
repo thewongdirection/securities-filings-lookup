@@ -13,9 +13,8 @@ offline and deterministic.
 SAMPLE_SIZE are sampled from a larger pool per market on each run, so
 repeated runs cover different issuers; the chosen sample is printed, and
 SKILL_LIVE_SEED makes a run reproducible. Every pool is checked against
-that venue's own directory where one is reachable -- the two that are not
-(Taiwan, which refuses this network, and London, whose index the FCA
-retired) say so where they are defined.
+that venue's own directory where one is reachable -- the one that is not
+(London, whose search index the FCA retired) says so where it is defined.
 
 What counts as a pass is per-venue, because "no rows" is a legitimate
 answer in some markets and a bug in others:
@@ -23,10 +22,9 @@ answer in some markets and a bug in others:
   * a venue that answers with filings must return at least one row
   * TDnet keeps only ~1 month, so an empty window is a pass if the script
     says that is what happened
-  * a venue that refuses this client (TWSE from a datacentre IP) or whose
-    endpoint has been retired upstream (the FCA's NSM search index) must
-    say so in those words -- the whole point of the venue-failure work is
-    that these do not masquerade as "nothing found"
+  * a venue whose endpoint has been retired upstream (the FCA's NSM search
+    index) must say so in those words -- the whole point of the
+    venue-failure work is that it does not masquerade as "nothing found"
 
 Nothing here may produce a traceback: every outcome has to arrive as one
 readable line, which is what SKILL.md promises the model.
@@ -86,17 +84,6 @@ CN_POOL = ["600519", "601318", "000858", "600036", "000001", "601899",
            "600900", "601628", "600028", "601857", "600016", "000002",
            "600104", "600585", "000725", "002415", "600690", "601988",
            "601398", "000063", "600050", "603288"]
-
-# NOT verifiable from this network: TWSE serves its HTTP-200 refusal page to
-# datacentre IPs on openapi.twse.com.tw as well as doc.twse.com.tw, so the
-# company directory cannot be read from here. These are long-standing TWSE
-# codes; the Taiwan test skips wholesale when TWSE refuses, so a wrong entry
-# would surface only on a network TWSE accepts.
-TW_POOL = ["2330", "2317", "2454", "2412", "2308", "2882", "1301", "2881",
-           "3008", "2303", "2002", "2891", "3711", "2207", "1216", "2886",
-           "2884", "1303", "2885", "2892", "2357", "3045", "2409", "2379",
-           "4938", "2408", "6505", "2801", "2883", "5880", "2887", "1101",
-           "1102", "2105", "9910", "2890", "2618", "2610", "2603", "2609"]
 
 # All 35 confirmed present in JPX's English listed-company directory
 # (4,441 rows), every one on the Prime Market.
@@ -265,76 +252,6 @@ class ChinaTest(unittest.TestCase):
                              if "static.cninfo.com.cn" in ln]
                 self.assertTrue(documents,
                                 f"{code_}: no document URL in {out[:200]}")
-
-
-@unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")
-class TaiwanTest(unittest.TestCase):
-    """Taiwan is unreachable from cloud sessions, and one request settles it.
-
-    TWSE applies its datacentre-IP filter at the edge across every host it
-    runs: doc., mops., openapi., mopsov., emops. and mopsfin.twse.com.tw all
-    answer HTTP 200 with the same 800-byte "FOR SECURITY REASONS" page
-    (verified 2026-09). So sampling 25 issuers here only produced 25
-    identical refusals and 25 pointless requests at a regulator that had
-    already said no.
-
-    This probes once instead. Where TWSE refuses, the class skips with the
-    reason; where it does not -- a residential connection, which is the
-    environment this venue is supported in -- the full sample runs exactly
-    as before. Nothing about the Taiwan code is disabled: it is the network
-    that is unsupported, not the venue.
-    """
-
-    @classmethod
-    def setUpClass(cls):
-        import urllib.error
-
-        import fetch_tw_filings
-        import net_errors
-        try:
-            # The real code path, so the probe cannot disagree with the
-            # fetcher about what a refusal looks like.
-            fetch_tw_filings._post({"step": "1", "co_id": "2330",
-                                    "year": "115", "mtype": "F",
-                                    "dtype": "F04"})
-        except net_errors.HostRefused as exc:
-            raise unittest.SkipTest(
-                "TWSE refuses this network on every one of its hosts -- see "
-                f"references/taiwan.md. Taiwan needs a connection TWSE "
-                f"accepts ({str(exc)[:60]}...)") from exc
-        except (urllib.error.URLError, OSError) as exc:
-            raise unittest.SkipTest(
-                f"doc.twse.com.tw unreachable from this environment: {exc}"
-            ) from exc
-
-    def test_issuers_either_list_filings_or_report_the_refusal(self):
-        chosen = sample(TW_POOL)
-        print(f"\n  Taiwan sample: {', '.join(chosen)}")
-        refused = 0
-        for code_ in chosen:
-            with self.subTest(code=code_):
-                rc, out, err = run_script("fetch_tw_filings.py", code_)
-                assert_no_traceback(self, code_, out, err)
-                if rc != 0:
-                    blocked = environment_block(out, err)
-                    if blocked:
-                        self.skipTest(f"{code_}: doc.twse.com.tw unreachable "
-                                      f"from this environment ({blocked})")
-                    # The regression this guards: a refusal reported as
-                    # "no annual filings found" for a perfectly good code.
-                    self.assertIn("refused this request", err + out)
-                    self.assertIn("mops.twse.com.tw", err + out)
-                    refused += 1
-                    continue
-                # A pass on exit 0 means filings were listed -- "No annual
-                # filings found" is the wrong answer this work removed.
-                self.assertNotIn("No annual filings found", out,
-                                 f"{code_}: exited 0 with nothing listed")
-                self.assertRegex(out, r"FY\d{4}\s+\S+",
-                                 f"{code_}: no listing rows in {out[:200]}")
-        if refused:
-            print(f"  (TWSE refused {refused}/{len(chosen)} from this network "
-                  "-- see references/taiwan.md)")
 
 
 @unittest.skipUnless(LIVE, "set SKILL_LIVE_TESTS=1 to exercise the live venues")

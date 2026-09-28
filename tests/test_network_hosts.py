@@ -64,14 +64,13 @@ PER_FILE_EXEMPT = {
     # documents are paid and per-request, and the three IR hosts are
     # called out as deliberately off the allowlist. Scoped to that file,
     # so a script that really did fetch ocbc.com still fails this test.
-    # taiwan.md names these to record that they were MEASURED AND REFUSE,
-    # or checked and ruled out -- the skill never fetches any of them. The
-    # three TWSE hosts it does use (doc./mops./openapi.) stay documented in
-    # README, because the venue works on networks TWSE accepts.
-    "taiwan.md": {"mopsov.twse.com.tw", "emops.twse.com.tw",
-                  "mopsfin.twse.com.tw", "data.gov.tw",
-                  "quality.data.gov.tw", "www.tpex.org.tw",
-                  "openapi.tpex.org.tw", "tpex.org.tw"},
+    # Taiwan was removed as a venue (TWSE refuses datacentre IPs on every
+    # host). These name MOPS only to hand over the browser route for a
+    # Taiwanese ticker; identify_venue.py is an offline classifier that
+    # never makes a request at all. Neither is a host the skill contacts,
+    # and putting it on an allowlist would be misleading.
+    "SKILL.md": {"mops.twse.com.tw"},
+    "identify_venue.py": {"mops.twse.com.tw"},
     "singapore.md": {"api2.sgx.com", "acra.gov.sg",
                      "dbs.com", "www.dbs.com",
                      "ocbc.com", "www.ocbc.com",
@@ -177,7 +176,6 @@ class EgressAllowlistTest(unittest.TestCase):
         for venue, marker in [("United States", "sec.gov"),
                               ("Mainland China", "cninfo.com.cn"),
                               ("Hong Kong", "hkexnews.hk"),
-                              ("Taiwan", "twse.com.tw"),
                               ("Japan", "tdnet.info"),
                               ("Japan (EDINET)", "edinet-fsa.go.jp"),
                               ("London", "fca.org.uk"),
@@ -226,8 +224,8 @@ class EgressAllowlistTest(unittest.TestCase):
     def test_markdown_emphasis_is_not_part_of_a_hostname(self):
         # A bolded URL in prose yielded "mops.twse.com.tw**", which would
         # report a documented host as undocumented under a mangled name.
-        self.assertEqual(hosts_in_text("see **https://mops.twse.com.tw** now"),
-                         {"mops.twse.com.tw"})
+        self.assertEqual(hosts_in_text("see **https://www.sgx.com** now"),
+                         {"www.sgx.com"})
 
     def test_filenames_are_not_mistaken_for_hosts(self):
         for not_a_host in ("SKILL.md", "pdf_utils.py", "us-edgar.md", "10-K.htm"):

@@ -28,8 +28,6 @@ CASES = [
     ("000001", "shenzhen", "000001"),
     ("301308", "shenzhen", "301308"),        # ChiNext
     ("830799", "beijing", "830799"),
-    ("2330.TW", "taiwan", "2330"),
-    ("6488.TWO", "taiwan", "6488"),          # TPEx
     ("AZN.L", "london", "AZN"),
     ("HSBA.LON", "london", "HSBA"),
     ("7203.T", "tokyo", "7203"),
@@ -51,6 +49,8 @@ class IdentifyVenueTest(unittest.TestCase):
         # to pick one, but it must say so.
         got = identify_venue.identify("2330")
         self.assertEqual(got["venue"], "hong_kong")
+        # Taiwan is not a covered venue, so the note has to name it
+        # anyway -- otherwise a Taiwanese code is silently answered as HK.
         self.assertIn("Taiwan", got["note"])
         self.assertIn("Tokyo", got["note"])
 

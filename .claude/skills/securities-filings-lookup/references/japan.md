@@ -9,7 +9,7 @@ Two official systems split Japan's disclosures:
 
 ## Ticker format
 
-4-digit codes (Toyota = 7203), suffix `.T` (also seen: `.JP`). **Bare 4-digit codes are three-way ambiguous** (HK / Taiwan / Japan) — the classifier assumes HK and says so; confirm.
+4-digit codes (Toyota = 7203), suffix `.T` (also seen: `.JP`). **Bare 4-digit codes are ambiguous with Hong Kong** — the classifier assumes HK and says so; confirm. The same shape is also a Taiwanese code, which this skill does not cover (see README).
 
 ## Script (TDnet, needs real network access)
 

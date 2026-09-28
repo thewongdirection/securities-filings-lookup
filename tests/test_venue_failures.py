@@ -25,12 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import fetch_cn_filings as cn  # noqa: E402
-import fetch_tw_filings as tw  # noqa: E402
 import fetch_uk_filings as uk  # noqa: E402
 import fetch_us_filings as us  # noqa: E402
 import net_errors  # noqa: E402
 
-TWSE_BLOCKED = (ROOT / "tests" / "fixtures" / "twse_blocked.html").read_bytes()
 
 
 def _json_response(payload: dict):
@@ -44,89 +42,6 @@ def _json_response(payload: dict):
             return False
 
     return Response(json.dumps(payload).encode())
-
-
-class TaiwanRefusalTest(unittest.TestCase):
-    """TWSE answers a refused request with HTTP 200 and a block page."""
-
-    def test_the_recorded_block_page_is_recognised(self):
-        text = tw._decode(TWSE_BLOCKED, "text/html; charset=UTF-8")
-        self.assertIn("CAN NOT BE ACCESSED", text.upper())
-        with self.assertRaises(net_errors.HostRefused) as caught:
-            tw._check_not_blocked(text)
-        message = str(caught.exception)
-        self.assertIn("mops.twse.com.tw", message)
-        self.assertIn("not an absence of filings", message)
-
-    def test_a_refusal_is_not_reported_as_no_filings(self):
-        # The bug: the block page fell through to "No annual filings found
-        # for 2330", sending the reader off to check a code that was fine.
-        # Stubbed at the socket, not at _post -- the check lives inside it.
-        class Response(io.BytesIO):
-            headers = {"Content-Type": "text/html; charset=UTF-8"}
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-        with mock.patch("urllib.request.urlopen",
-                        return_value=Response(TWSE_BLOCKED)):
-            with self.assertRaises(net_errors.HostRefused):
-                tw.list_files("2330", 2025, "annual")
-
-    def test_decode_honours_the_declared_charset(self):
-        big5 = "年報".encode("big5")
-        utf8 = "年報".encode("utf-8")
-        self.assertEqual(tw._decode(big5, "text/html; charset=big5"), "年報")
-        self.assertEqual(tw._decode(utf8, "text/html; charset=UTF-8"), "年報")
-        # Quoted forms parse too -- a hand-rolled split got this wrong.
-        self.assertEqual(tw._decode(big5, 'text/html; charset="big5"'), "年報")
-        # No header at all: Big5, the document server's historical default.
-        self.assertEqual(tw._decode(big5, ""), "年報")
-        # And what the parsing actually depends on is ASCII either way, so a
-        # mis-declared charset cannot hide a refusal or a listing link.
-        ascii_only = b'FOR SECURITY REASONS ... readfile2("F","2330","x.pdf")'
-        for content_type in ("", "text/html; charset=UTF-8", "text/html; charset=big5"):
-            with self.subTest(content_type=content_type):
-                self.assertIn("readfile2", tw._decode(ascii_only, content_type))
-
-    def test_a_refused_document_fetch_never_becomes_a_saved_filing(self):
-        # The worst version of this bug: an 800-byte block page written to
-        # <ticker>.pdf and reported as the annual report.
-        class Response(io.BytesIO):
-            headers = {"Content-Type": "text/html; charset=UTF-8"}
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-        step9 = "<a href='/pdf/202503_2330_AI1_ts.pdf'>download</a>"
-        with mock.patch.object(tw, "_post", return_value=step9), \
-                mock.patch("urllib.request.urlopen",
-                           return_value=Response(TWSE_BLOCKED)):
-            with self.assertRaises(net_errors.HostRefused):
-                tw.download("F", "2330", "202503_2330_AI1.pdf")
-
-    def test_a_chinese_only_refusal_is_recognised(self):
-        # Markers taken from the recorded page, not invented: TWSE writes
-        # 無法呈現. Guessing 無法瀏覽 would have been dead code.
-        chinese = tw._decode(TWSE_BLOCKED, "text/html; charset=UTF-8")
-        self.assertIn("無法呈現", chinese)
-        english_removed = chinese.replace("CAN NOT BE ACCESSED", "")
-        with self.assertRaises(net_errors.HostRefused):
-            tw._check_not_blocked(english_removed)
-
-    def test_a_real_listing_still_parses(self):
-        listing = ('<a href="javascript:readfile2("F","2330",'
-                   '"202503_2330_AI1.pdf")">')
-        with mock.patch.object(tw, "_post", return_value=listing):
-            self.assertEqual(
-                [f[2] for f in tw.list_files("2330", 2025, "annual")],
-                ["202503_2330_AI1.pdf"])
 
 
 RECENT_ONLY_10Q = {
@@ -354,37 +269,10 @@ class HostRefusedReportingTest(unittest.TestCase):
         self.assertNotIn("Traceback", stderr.getvalue())
 
 
-class TaiwanDirectoryRefusalTest(unittest.TestCase):
-    """The company directory used for name resolution is served by
-    openapi.twse.com.tw, which returns the same HTTP-200 refusal page as the
-    document server -- and used to be reported as unreadable JSON."""
-
-    BLOCK = (b"<html><body>\n FOR SECURITY REASONS, THIS PAGE CAN NOT BE "
-             b"ACCESSED.<BR>\n</body></html>")
-
-    def test_the_refusal_page_is_recognised_not_parsed(self):
-        import resolve_name
-        with self.assertRaises(net_errors.HostRefused) as caught:
-            resolve_name._twse_not_blocked(self.BLOCK)
-        message = str(caught.exception)
-        self.assertIn("openapi.twse.com.tw", message)
-        self.assertIn("mops.twse.com.tw", message)
-
-    def test_real_json_passes_the_check(self):
-        import resolve_name
-        resolve_name._twse_not_blocked(b'[{"\u516c\u53f8\u4ee3\u865f": "2330"}]')
-
-    def test_name_resolution_reports_the_refusal_rather_than_a_parse_error(self):
-        import resolve_name
-        with mock.patch.object(resolve_name, "_get", return_value=self.BLOCK), \
-                mock.patch.object(resolve_name.disk_cache, "is_fresh",
-                                  return_value=False):
-            rows = resolve_name.search_tw("TSMC")
-        self.assertEqual(len(rows), 1)
-        venue, code, detail = rows[0]
-        self.assertEqual((venue, code), ("tw", "ERROR"))
-        self.assertIn("TWSE refused", detail)
-        self.assertNotIn("JSON", detail)
+class VenueDirectoryCacheTest(unittest.TestCase):
+    """The shared directory cache behind name resolution: a host that
+    answers with HTML instead of JSON is declining this client, and that
+    must never be cached or reported as an empty result set."""
 
     def test_a_non_json_body_from_any_venue_is_called_a_refusal(self):
         # The generic path: a directory that answers with HTML instead of
@@ -445,62 +333,85 @@ class TaiwanDirectoryRefusalTest(unittest.TestCase):
         self.assertEqual(stored, [])
 
 
-class TaiwanUnsupportedNetworkTest(unittest.TestCase):
-    """Taiwan's code is kept and works from a residential connection, but
-    TWSE refuses datacentre IPs on every host, so the docs have to say that
-    plainly -- otherwise a cloud user reads "403" as an egress gap and keeps
-    adding allowlist entries that cannot help."""
+class TaiwanRemovedTest(unittest.TestCase):
+    """Taiwan was a supported venue and was removed: TWSE refuses datacentre
+    IPs on every host it runs, so it could not be relied on in the
+    environment this skill is mostly used in.
 
-    def test_the_reference_records_that_every_twse_host_refuses(self):
-        text = (ROOT / "references" / "taiwan.md").read_text(encoding="utf-8")
-        # Each host has to appear as a row of the measured-hosts table, not
-        # merely somewhere in the file: several are also named in the prose
-        # about routes that were ruled out, so a plain substring check
-        # passed even with a row deleted.
-        rows = [ln for ln in text.splitlines()
-                if ln.startswith("| `") and "twse.com.tw`" in ln]
-        listed = {ln.split("`")[1] for ln in rows}
-        for host in ("doc.twse.com.tw", "mops.twse.com.tw",
-                     "openapi.twse.com.tw", "mopsov.twse.com.tw",
-                     "emops.twse.com.tw", "mopsfin.twse.com.tw"):
-            with self.subTest(host=host):
-                self.assertIn(host, listed,
-                              "not a row of the measured-hosts table")
-        self.assertIn("IP-wide", text)
+    Removing code is easy; removing it and leaving a 4-digit Taiwanese code
+    silently answered as Hong Kong is the trap. These assert that the
+    removal stays explained and that the user is still pointed somewhere.
+    """
 
-    def test_the_reference_says_the_code_is_not_the_problem(self):
-        text = (ROOT / "references" / "taiwan.md").read_text(encoding="utf-8")
-        self.assertIn("It is the network that is", text)
-        self.assertIn("residential", text)
+    def test_nothing_imports_the_deleted_fetcher(self):
+        for script in sorted((ROOT / "scripts").glob("*.py")):
+            with self.subTest(script=script.name):
+                self.assertNotIn("fetch_tw_filings",
+                                 script.read_text(encoding="utf-8"))
 
-    def test_the_reference_gives_the_manual_route(self):
-        text = (ROOT / "references" / "taiwan.md").read_text(encoding="utf-8")
-        for expected in ("mops.twse.com.tw", "investor-relations", "20-F"):
+    def test_the_venue_is_gone_from_the_name_resolver(self):
+        import resolve_name
+        self.assertNotIn("tw", resolve_name.VENUES)
+        self.assertFalse(hasattr(resolve_name, "search_tw"))
+
+    def test_a_bare_four_digit_code_still_names_taiwan(self):
+        # The whole point: 2330 resolves to Hong Kong by shape, so the note
+        # is the only thing that stops a Taiwanese request being answered
+        # with the wrong company's filings.
+        import identify_venue
+        note = identify_venue.identify("2330").get("note", "")
+        self.assertIn("Taiwan", note)
+        self.assertIn("no longer covers", note)
+
+    def test_a_tw_suffix_is_recognised_and_declined_not_left_unknown(self):
+        # Removing the suffix map entry made .TW fall through to "unknown",
+        # whose note tells the reader to run resolve_name.py -- advice that
+        # cannot help for a ticker whose venue is perfectly clear. A
+        # recognised-but-unsupported answer is the useful one.
+        import identify_venue
+        for ticker, market in (("2330.TW", "TWSE"), ("6488.TWO", "TPEx")):
+            with self.subTest(ticker=ticker):
+                got = identify_venue.identify(ticker)
+                self.assertEqual(got["venue"], "unsupported")
+                self.assertEqual(got["code"], ticker.split(".")[0])
+                self.assertIn(market, got["note"])
+                self.assertIn("does not cover", got["note"])
+                self.assertNotIn("Could not classify", got["note"])
+
+    def test_the_declined_note_gives_the_routes_that_do_work(self):
+        import identify_venue
+        note = identify_venue.identify("2330.TW")["note"]
+        for route in ("mops.twse.com.tw", "IR site", "20-F", "TSM"):
+            with self.subTest(route=route):
+                self.assertIn(route, note)
+
+    def test_skill_md_says_taiwan_is_not_covered_and_what_to_do(self):
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Taiwan (TWSE / MOPS) is not covered", text)
+        # The three routes that do work, so the model has an answer rather
+        # than just a refusal.
+        for route in ("mops.twse.com.tw", "investor-relations", "20-F"):
+            with self.subTest(route=route):
+                self.assertIn(route, text)
+
+    def test_the_readme_records_why_and_how_to_revive_it(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Taiwan (TWSE / MOPS) is not covered", text)
+        # The measurement, so nobody re-runs it, and the routes ruled out.
+        for expected in ("mopsfin.twse.com.tw", "quality.data.gov.tw",
+                         "tpex.org.tw", "git log"):
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
 
-    def test_skill_md_marks_the_venue_unreachable_from_the_cloud(self):
-        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        row = [ln for ln in text.splitlines()
-               if ln.startswith("| Taiwan |")]
-        self.assertTrue(row, "SKILL.md has no Taiwan row in the venue table")
-        self.assertIn("unreachable from cloud sessions", row[0])
-
-    def test_the_readme_says_allowlisting_the_hosts_is_not_enough(self):
-        text = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Taiwan does not work from a cloud container", text)
-        self.assertIn("no egress change\nfixes it", text)
-
-    def test_the_twse_hosts_stay_documented_for_networks_that_work(self):
-        # Removing them would make the venue undiscoverable on the networks
-        # where it does work, and test_network_hosts would fail anyway.
+    def test_no_twse_host_is_on_the_egress_list_any_more(self):
         import re
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         block = re.search(r"<!--\s*egress-hosts:start\s*-->(.*?)"
                           r"<!--\s*egress-hosts:end\s*-->", text, re.S)
         self.assertIsNotNone(block, "README has no egress-hosts block")
-        hosts = [ln.strip() for ln in block.group(1).splitlines()]
-        self.assertIn("doc.twse.com.tw", hosts)
+        hosts = [ln.strip() for ln in block.group(1).splitlines() if ln.strip()]
+        self.assertFalse([h for h in hosts if "twse" in h],
+                         "the skill no longer contacts TWSE")
 
 
 class JapanDirectoryTest(unittest.TestCase):

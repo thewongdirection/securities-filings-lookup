@@ -15,10 +15,14 @@ Sources (all free, official):
 - HK:      HKEXnews prefix.do name lookup
 - China:   CNINFO topSearch (matches Chinese names/pinyin; English
            names usually don't match -- expect misses for English input)
+- Japan:   JPX's English company list (needs openpyxl)
 - London:  FCA NSM search, distinct company values from recent hits
+           (the FCA retired that index, so this row reports an error)
+- Singapore: SGX's securities directory (stocks, REITs, trusts, ETFs)
 
-A name can legitimately resolve in several venues at once (TSMC ->
-TSM ADR on EDGAR + 2330 on TWSE). Present the candidates and apply
+A name can legitimately resolve in several venues at once (a Hong Kong
+H-share and its A-share, or Jardine Cycle & Carriage in Singapore and
+London). Present the candidates and apply
 SKILL.md's confirmation rule; don't silently pick one.
 """
 from __future__ import annotations

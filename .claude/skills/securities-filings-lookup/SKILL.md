@@ -77,7 +77,7 @@ Run the heuristic classifier (no network needed):
 python scripts/identify_venue.py <ticker>
 ```
 
-It parses common suffixes (`.HK`, `.SS`/`.SH`, `.SZ`) and bare numeric codes (HK codes are short, 1–5 digits; mainland A-share codes are 6 digits, with the prefix indicating Shanghai vs. Shenzhen vs. Beijing). Alphabetic tickers default to "US-listed."
+It parses exchange suffixes — `.HK`, `.SS`/`.SH`, `.SZ`, `.L`, `.T`, `.SI`/`.SGX`, `.DE`/`.F` — and bare codes (HK codes are short, 1–5 digits; mainland A-share codes are 6 digits, with the prefix indicating Shanghai vs. Shenzhen vs. Beijing; Singapore codes that mix letters and digits, like `D05` or `A17U`, are claimed for SGX). Bare alphabetic tickers default to "US-listed", and bare 4-digit or pure-letter codes can also be Japanese, Hong Kong or Singaporean, so the note it prints says when to confirm.
 
 ### Company names: resolve to a ticker first
 
@@ -88,7 +88,7 @@ python scripts/resolve_name.py "Tencent"
 python scripts/resolve_name.py "Tencent" --venues us,hk
 ```
 
-It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM, JPX's English company list for Japan) and prints candidates as `venue code name`. A venue that cannot answer returns an `ERROR` row and the others still report — the UK row currently always errors, because the FCA retired that search index. Germany has no public directory — resolve German names by web search. Then:
+It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, FCA NSM, JPX's English company list for Japan, SGX's securities directory for Singapore) and prints candidates as `venue code name`. A venue that cannot answer returns an `ERROR` row and the others still report — the UK row currently always errors, because the FCA retired that search index. Germany has no public directory — resolve German names by web search. Then:
 
 - **Confirm with the user before proceeding** (AskUserQuestion where available): list the plausible candidates with the closest match first and marked as the default. **If no answer arrives within ~15 seconds** or the session is non-interactive, **proceed with the closest match** — say so in the question and in your reply.
 - Filter obvious noise before asking: HK results include listed *notes/bonds* (names like "TENCENT N2801") — the plain equity is the short bare name; UK results may lack a symbol.

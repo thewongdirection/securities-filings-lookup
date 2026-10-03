@@ -1,6 +1,6 @@
 # securities-filings-lookup
 
-A [Claude Code](https://claude.com/claude-code) skill that looks up official financial and securities filings for any stock ticker — working out where the company is actually listed, fetching from the authoritative regulator source, and saving the original documents as PDFs.
+A [Claude Code](https://claude.com/claude-code) skill that looks up official financial and securities filings for a stock ticker or company name across seven markets (US, Hong Kong, mainland China, London, Japan, Singapore, Germany) — working out where the company is actually listed, fetching from the authoritative regulator source, and saving the original documents as PDFs. Taiwan was removed (see [below](#taiwan-twse--mops-is-not-covered)).
 
 **Covered venues:**
 
@@ -11,10 +11,10 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇨🇳 Mainland China A-shares | CNINFO (SSE + SZSE) | 年度报告, 半年度报告, 季度报告, prospectuses |
 | 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
 | 🇯🇵 Japan | TDnet (+ EDINET pointers) | 決算短信 (earnings), timely disclosures |
-| 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements |
+| 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements (issuer lookup and document download are scripted; finding the announcement is manual) |
 | 🇩🇪 Frankfurt / Germany | Unternehmensregister / IR sites | Annual reports (documented workflow, no scraper) |
 
-For cross-listed companies the skill retrieves every covered venue's filings and says what it can't reach. Venue quirks are documented per market: modern UK annual reports are ESEF zip packages (xHTML/iXBRL), Japan's EDINET API needs a free subscription key (TDnet is keyless but keeps only ~1 month), and Germany's official repositories are browse-only so the IR-site annual report or a SEC 20-F (SAP) is the practical route.
+For cross-listed companies the skill retrieves every covered venue's filings and says what it can't reach. Venue quirks are documented per market: modern UK annual reports are ESEF zip packages (xHTML/iXBRL), Japan's EDINET API needs a free subscription key (TDnet is keyless but keeps only ~1 month), and Singapore has no listing API, so you supply the SGXNet announcement and the skill pulls every attached document, and Germany's official repositories are browse-only so the IR-site annual report or a SEC 20-F (SAP) is the practical route.
 
 ## Install
 
@@ -51,7 +51,7 @@ Two consequences worth knowing:
 
 ## Prerequisites
 
-- **Claude Code (or Claude Desktop)** with real network access — the scripts talk directly to `sec.gov` / `data.sec.gov`, `cninfo.com.cn`, and `hkexnews.hk`. In claude.ai's sandbox those hosts are unreachable, so there the skill degrades gracefully to venue identification and direct links (no PDF downloads).
+- **Claude Code (or Claude Desktop)** with real network access — the scripts talk directly to each regulator's servers (`sec.gov`, `cninfo.com.cn`, `hkexnews.hk`, `tdnet.info`, `fca.org.uk`, `sgx.com`; the full list is under [Network access](#network-access-cloud-containers-proxies-locked-down-networks)). In claude.ai's sandbox those hosts are unreachable, so there the skill degrades gracefully to venue identification and direct links (no PDF downloads).
 - **A contact address for SEC** — SEC's fair-access policy requires it, and its edge returns `403` for a `User-Agent` without an email address (a project URL alone is not enough; verified live). Set it once:
   ```bash
   export SEC_USER_AGENT='<Your Name> <you@your-provider.com>'   # this shell
@@ -178,6 +178,7 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
 /securities-filings-lookup AZN.L         # London
 /securities-filings-lookup 7203.T        # Tokyo
+/securities-filings-lookup D05.SI        # Singapore (also: DBS, A17U.SI)
 /securities-filings-lookup SAP.DE        # Frankfurt / XETRA
 ```
 
@@ -224,8 +225,13 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 - `scripts/identify_venue.py` — offline ticker→venue classifier (suffixes, bare codes, class shares)
 - `scripts/fetch_us_filings.py` — SEC EDGAR listing + PDF save (handles SEC's gzip responses, bot detection, rate-limit caching)
 - `scripts/fetch_cn_filings.py` — CNINFO listing + PDF save (handles the `code,orgId` query requirement and server-side title search)
-- `scripts/save_filing.py` / `scripts/pdf_utils.py` — save any filing URL as the original PDF
-- `references/` — per-venue mechanics, URL patterns, and documented dead ends so they don't get re-tried
+- `scripts/fetch_jp_filings.py` — TDnet disclosures for Japan (~1 month window; EDINET pointers)
+- `scripts/fetch_uk_filings.py` — FCA NSM downloads; reports that the search index is retired and gives the manual route
+- `scripts/fetch_sg_filings.py` — SGX issuer resolution (stocks, REITs, trusts, ETFs) and SGXNet announcement/document download
+- `scripts/resolve_name.py` — company name → candidate tickers from each venue's own directory
+- `scripts/sec_identity.py`, `scripts/naming.py`, `scripts/disk_cache.py`, `scripts/pdf_utils.py` — SEC contact resolution, filename scheme, venue caches, PDF saving
+- `scripts/save_filing.py` — save any filing URL as the original PDF (Hong Kong and Germany have no fetch script; use this with a URL from the reference doc's workflow)
+- `references/` — one doc per venue (`us-edgar`, `hong-kong`, `china-a-shares`, `london`, `japan`, `singapore`, `frankfurt`): mechanics, URL patterns, and documented dead ends so they don't get re-tried
 - `scripts/net_errors.py` — turns rate limits, blocked hosts and TLS failures into one plain line instead of a traceback
 - `scripts/sync_project_skill.py` — mirrors the skill into `.claude/skills/` so the two copies can't drift
 - `tests/` — offline regression tests (no network required)
@@ -236,12 +242,12 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 python -m unittest discover -s tests      # every offline regression test
 python scripts/sync_project_skill.py      # after editing SKILL.md / scripts / references
 
-# all seven markets against the live regulators, 10 issuers sampled per market
+# all seven markets against the live regulators, 25 issuers sampled per market
 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live -v
 SKILL_LIVE_SEED=7 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live
 ```
 
-`tests/test_markets_live.py` samples ten issuers per venue from a larger pool on
+`tests/test_markets_live.py` samples 25 issuers per venue from a larger pool on
 each run (the sample is printed; `SKILL_LIVE_SEED` makes a run reproducible) and
 asserts what a pass means for that venue: filings returned where the venue
 answers, "the window is empty" stated where TDnet's ~1 month has nothing, and the
@@ -252,4 +258,4 @@ index). No outcome may arrive as a traceback. It is skipped without
 
 The repo root is the canonical skill; `.claude/skills/securities-filings-lookup/` is a generated mirror that lets Claude Code on the web load it as a project skill. `tests/test_skill_layout.py` fails if the two drift, so run the sync script before committing.
 
-The tests are pure standard library and never touch a regulator's server: network responses are stubbed, and the self-update tests run against throwaway local git repositories. Anything that needs live access to SEC/CNINFO/TWSE belongs in a manual check, not the suite.
+The tests are pure standard library and never touch a regulator's server: network responses are stubbed, and the self-update tests run against throwaway local git repositories. Anything that needs live access to a regulator (SEC, CNINFO, SGX and so on) belongs in a manual check, not the suite.

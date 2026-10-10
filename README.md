@@ -235,6 +235,8 @@ SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live -v
 SKILL_LIVE_SEED=7 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live
 ```
 
+CI (`.github/workflows/tests.yml`) runs the offline suite and the mirror check on Python 3.10–3.13 for every pull request and every push to `main`; the live suite never runs there.
+
 `tests/test_markets_live.py` samples twenty-five issuers per venue from a larger pool on
 each run (the sample is printed; `SKILL_LIVE_SEED` makes a run reproducible) and
 asserts what a pass means for that venue: filings returned where the venue

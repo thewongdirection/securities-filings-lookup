@@ -158,6 +158,42 @@ class NoSelfUpdateTest(unittest.TestCase):
         self.assertNotRegex(text, r"(?i)\bgit\s+(pull|fetch|merge)\b")
 
 
+class CiWorkflowTest(unittest.TestCase):
+    """The workflow is what keeps a failing suite from being merged, so the
+    properties that make it both effective and safe are pinned here."""
+
+    WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
+
+    def setUp(self):
+        self.text = self.WORKFLOW.read_text(encoding="utf-8")
+
+    def test_it_runs_the_suite_and_the_mirror_check(self):
+        self.assertIn("python -m unittest discover -s tests", self.text)
+        self.assertIn("python scripts/sync_project_skill.py --check", self.text)
+
+    def test_it_runs_on_pull_requests_and_main(self):
+        self.assertRegex(self.text, r"(?m)^  pull_request:")
+        self.assertRegex(self.text, r"(?m)^    branches: \[main\]")
+
+    def test_it_never_uses_the_privileged_fork_trigger(self):
+        # pull_request_target runs with the base repo's secrets and write
+        # token against code a fork controls.
+        self.assertNotIn("pull_request_target", self.text)
+
+    def test_it_is_read_only_and_does_not_persist_credentials(self):
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read$")
+        self.assertNotRegex(self.text, r"(?m)^\s+[\w-]+: write\b")
+        self.assertIn("persist-credentials: false", self.text)
+
+    def test_it_covers_the_oldest_python_the_readme_promises(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Python 3.10+", readme)
+        self.assertIn('"3.10"', self.text)
+
+    def test_it_never_enables_the_live_network_tests(self):
+        self.assertNotIn("SKILL_LIVE_TESTS", self.text.split("jobs:", 1)[1])
+
+
 class SecContactDocumentationTest(unittest.TestCase):
     def test_the_contact_requirement_is_documented_before_retrieval(self):
         text = SKILL_MD.read_text(encoding="utf-8")

@@ -1,0 +1,48 @@
+name: tests
+
+# The offline regression suite, on every pull request and on main. It never
+# touches a regulator's server: network responses are stubbed, and the
+# opt-in live tests skip themselves unless SKILL_LIVE_TESTS=1 is set.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only: nothing in this workflow needs to write to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # README: "Python 3.10+". Test the oldest and the newest supported.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Optional at runtime, but without it the JPX name-lookup tests skip
+      # instead of running.
+      - name: Install openpyxl
+        run: python -m pip install openpyxl
+
+      - name: Project skill copy matches the repo root
+        run: python scripts/sync_project_skill.py --check
+
+      - name: Offline regression suite
+        run: python -m unittest discover -s tests

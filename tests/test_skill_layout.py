@@ -27,22 +27,25 @@ import sync_project_skill  # noqa: E402
 SKILL_MD = ROOT / "SKILL.md"
 
 
-def step_zero(text: str) -> str:
-    """Step 0's own prose: up to the NEXT top-level heading, whatever it is.
+def section(text: str, heading: str) -> str:
+    """One section's own prose: up to the NEXT top-level heading, whatever it is.
 
-    Slicing to "## Step 1" swept in any section inserted between them, so
-    assertions about Step 0 could be satisfied by unrelated text.
+    Slicing to a fixed later heading swept in any section inserted between
+    them, so assertions about one section could be satisfied by unrelated
+    text.
     """
-    after = text.split("## Step 0", 1)[1]
+    after = text.split(f"## {heading}", 1)[1]
     parts = re.split(r"\n## ", after, maxsplit=1)
     return parts[0]
+
+
 SCRIPTS = sorted((ROOT / "scripts").glob("*.py"))
 
 # Imported by the CLIs rather than run: no argparse, no network.
 LIBRARY_MODULES = {"pdf_utils.py", "net_errors.py", "naming.py",
                    "sec_identity.py", "disk_cache.py"}
 # CLIs that never touch the network, so they don't route through net_errors.
-OFFLINE_CLIS = {"identify_venue.py", "update_skill.py", "sync_project_skill.py"}
+OFFLINE_CLIS = {"identify_venue.py", "sync_project_skill.py"}
 
 
 class ProjectCopyTest(unittest.TestCase):
@@ -117,32 +120,42 @@ class SkillDefinitionTest(unittest.TestCase):
         # The shell's cwd is the user's project, not the skill, so a bare
         # "python scripts/..." silently does nothing -- or runs the
         # project's own scripts/ file.
-        step0 = step_zero(self.text)
-        self.assertIn("relative to the skill's own directory", step0)
-        self.assertIn("<skill-dir>/scripts/update_skill.py", step0)
+        guidance = section(self.text, "Running the scripts")
+        self.assertIn("relative to the skill's own directory", guidance)
+        self.assertIn("<skill-dir>/scripts/identify_venue.py", guidance)
 
-    def test_step_zero_tells_the_model_to_self_update_and_re_read(self):
-        self.assertIn("scripts/update_skill.py", self.text)
-        step0 = step_zero(self.text)
-        for expected in ("updated", "up-to-date", "skipped", "Re-read `SKILL.md`"):
-            with self.subTest(expected=expected):
-                self.assertIn(expected, step0)
+    def test_the_path_guidance_comes_before_the_first_script_is_run(self):
+        first_command = re.search(r"(?m)^python3? \S*scripts/", self.text)
+        self.assertIsNotNone(first_command, "SKILL.md shows no script command")
+        self.assertLess(self.text.index("## Running the scripts"),
+                        first_command.start())
 
 
-class SkipReasonDocumentationTest(unittest.TestCase):
-    """Step 0 tells the model how to react to `reason:` -- so every reason
-    the script can emit has to appear there. Six were undocumented."""
+class NoSelfUpdateTest(unittest.TestCase):
+    """The skill is distributed through a marketplace that owns updates, so
+    it must never go back to pulling itself. Same shape as the guard for the
+    removed Taiwan fetcher: the removal has to stay complete and explained.
+    """
 
-    def test_every_reason_the_script_emits_is_in_skill_md(self):
-        source = (ROOT / "scripts" / "update_skill.py").read_text(encoding="utf-8")
-        reasons = set(re.findall(r'skip\(\s*\n?\s*"([a-z-]+)"', source))
-        reasons |= set(re.findall(r'report\.add\("reason", "([a-z-]+)"\)', source))
-        self.assertTrue(reasons)
-        step0 = step_zero(SKILL_MD.read_text(encoding="utf-8"))
-        missing = sorted(r for r in reasons if r not in step0)
-        self.assertEqual(missing, [],
-                         f"update_skill.py can emit reasons SKILL.md never "
-                         f"mentions: {missing}")
+    def test_the_updater_script_and_its_tests_are_gone(self):
+        self.assertFalse((ROOT / "scripts" / "update_skill.py").exists())
+        self.assertFalse((ROOT / "tests" / "test_update_skill.py").exists())
+
+    def test_nothing_runs_or_imports_an_updater(self):
+        for path in SCRIPTS + [SKILL_MD, ROOT / "README.md"]:
+            with self.subTest(path=path.name):
+                self.assertNotIn("update_skill",
+                                 path.read_text(encoding="utf-8"))
+
+    def test_skill_md_has_no_update_step(self):
+        text = SKILL_MD.read_text(encoding="utf-8")
+        # Steps 1-3 keep their numbers and every "see Step 3" cross-reference
+        # points at them; a revived Step 0 would be an update step again.
+        self.assertNotIn("## Step 0", text)
+        self.assertNotRegex(text, r"(?i)\b(self-?updat\w*|updates itself)\b")
+        self.assertNotRegex(text, r"(?i)\bfast-forward")
+        self.assertNotRegex(text, r"(?i)\bauto-?updat")
+        self.assertNotRegex(text, r"(?i)\bgit\s+(pull|fetch|merge)\b")
 
 
 class SecContactDocumentationTest(unittest.TestCase):
@@ -155,12 +168,12 @@ class SecContactDocumentationTest(unittest.TestCase):
                         "the contact is needed before the first SEC request")
 
     def test_it_tells_the_model_to_ask_rather_than_invent(self):
-        section = SKILL_MD.read_text(encoding="utf-8").split(
+        contact_section = SKILL_MD.read_text(encoding="utf-8").split(
             "SEC filings need a contact address", 1)[1].split("\n## ", 1)[0]
         for expected in ("Ask the user", "sec_user_agent.txt", "SEC_USER_AGENT",
                          "never reuse an address"):
             with self.subTest(expected=expected):
-                self.assertIn(expected, section)
+                self.assertIn(expected, contact_section)
 
 
 class ScriptHealthTest(unittest.TestCase):

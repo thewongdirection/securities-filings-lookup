@@ -42,8 +42,9 @@ OPTIONAL_BLOCK_RE = re.compile(
     re.S)
 
 # Hosts that are not filing sources and so are not part of the allowlist:
-# GitHub reaches sessions through its own proxy, and the rest are
-# documentation links or placeholders in docstrings.
+# github.com appears only as this project's URL in docs and in the
+# User-Agent example, and the rest are documentation links or
+# placeholders in docstrings.
 EXEMPT = {
     "github.com", "www.github.com", "raw.githubusercontent.com",
     "claude.com", "claude.ai", "code.claude.com",

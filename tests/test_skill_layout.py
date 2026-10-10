@@ -158,6 +158,61 @@ class NoSelfUpdateTest(unittest.TestCase):
         self.assertNotRegex(text, r"(?i)\bgit\s+(pull|fetch|merge)\b")
 
 
+class DocsMatchTheCodeTest(unittest.TestCase):
+    """README and SKILL.md make claims the code can check. Each of these
+    caught, or would have caught, a real mistake: a README example
+    (`600519:SS`) that classified as unknown, and prose that listed three of
+    the classifier's seven venues' suffixes."""
+
+    def setUp(self):
+        self.readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.skill = SKILL_MD.read_text(encoding="utf-8")
+
+    def test_every_readme_usage_example_classifies_to_a_venue(self):
+        import identify_venue
+
+        examples = re.findall(r"(?m)^/securities-filings-lookup (\S+)", self.readme)
+        self.assertGreaterEqual(len(examples), 8)
+        for ticker in examples:
+            with self.subTest(ticker=ticker):
+                self.assertNotEqual(identify_venue.identify(ticker)["venue"],
+                                    "unknown",
+                                    f"README shows `{ticker}` but the classifier "
+                                    "cannot place it")
+
+    def test_every_venue_the_classifier_knows_has_a_suffix_in_skill_md(self):
+        import identify_venue
+
+        by_venue: dict[str, list[str]] = {}
+        for suffix, venue in identify_venue.SUFFIX_MAP.items():
+            by_venue.setdefault(venue, []).append(suffix)
+        for venue, suffixes in sorted(by_venue.items()):
+            with self.subTest(venue=venue):
+                self.assertTrue(any(f"`{s}`" in self.skill for s in suffixes),
+                                f"SKILL.md names none of {suffixes} for {venue}")
+
+    def test_every_readme_anchor_link_points_at_a_real_heading(self):
+        def slug(title: str) -> str:
+            # GitHub: lower-case, drop punctuation, one hyphen per space.
+            return re.sub(r"[^\w\- ]", "", title.lower()).replace(" ", "-")
+
+        headings = {slug(m) for m in re.findall(r"(?m)^#{1,6} (.+?)\s*$", self.readme)}
+        anchors = re.findall(r"\]\(#([^)]+)\)", self.readme)
+        if not anchors:
+            self.skipTest("the README has no in-page links to check")
+        for anchor in anchors:
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, headings)
+
+    def test_the_readme_leads_with_the_markets_it_actually_covers(self):
+        intro = self.readme.split("**Covered venues:**", 1)[0]
+        for market in ("US", "Hong Kong", "mainland China", "London", "Japan",
+                       "Singapore", "Germany"):
+            with self.subTest(market=market):
+                self.assertIn(market, intro)
+        self.assertIn("Taiwan is not covered", intro)
+
+
 class CiWorkflowTest(unittest.TestCase):
     """The workflow is what keeps a failing suite from being merged, so the
     properties that make it both effective and safe are pinned here."""

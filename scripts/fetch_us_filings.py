@@ -30,6 +30,7 @@ import os
 import re
 import time
 import gzip
+import http.client
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -84,6 +85,10 @@ DEFAULT_EXHIBITS = "EX-13"
 # private issuer's 20-F is self-contained, so there is nothing to chase.
 EX13_FORMS = {"10-K", "10-K405", "10-KSB"}
 
+# A document that cannot be fetched or rendered is skipped, not the run.
+# IncompleteRead (a body cut short) is an HTTPException, not an OSError.
+SKIPPABLE_ERRORS = (urllib.error.URLError, OSError, http.client.HTTPException)
+
 # Markers of a certification rather than a report, for a 10-K filer that
 # numbers its exhibits unusually. EDGAR's Description column is often just
 # the exhibit number ("EX-13.1"), so the filename carries the signal:
@@ -106,7 +111,10 @@ def _get(url: str) -> bytes:
 
 
 def _get_json(url: str) -> dict:
-    body = _get(url)
+    return _decode_json(url, _get(url))
+
+
+def _decode_json(url: str, body: bytes) -> dict:
     try:
         return json.loads(body.decode())
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -138,7 +146,7 @@ def resolve_cik(ticker: str) -> tuple[int, str]:
 
     def _refresh() -> dict:
         raw = _get(TICKERS_URL)
-        data = json.loads(raw.decode())
+        data = _decode_json(TICKERS_URL, raw)  # cache only what parsed
         disk_cache.store(cache, raw)
         return data
 
@@ -377,7 +385,7 @@ def fetch_exhibits(row: dict, wanted: list[str]) -> list[dict]:
     try:
         time.sleep(0.15)
         html = _get(url).decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError) as exc:
+    except SKIPPABLE_ERRORS as exc:
         print(f"    (could not check {row['form']} exhibits: {exc}; "
               f"primary document only)")
         return []
@@ -455,7 +463,7 @@ def save_rows(rows: list[dict], ticker: str, save_dir: str,
                            r["accession"])
         try:
             saved = save_document(r["url"], os.path.join(save_dir, name))
-        except (urllib.error.URLError, OSError) as exc:
+        except SKIPPABLE_ERRORS as exc:
             _reraise_if_fatal(exc)
             # One unreachable document is not worth abandoning the rest of
             # the run; --limit 10 must not quietly mean "until one fails".
@@ -472,7 +480,7 @@ def save_rows(rows: list[dict], ticker: str, save_dir: str,
                 r["accession"])
             try:
                 saved_ex = save_document(ex["url"], os.path.join(save_dir, ex_name))
-            except (urllib.error.URLError, OSError) as exc:
+            except SKIPPABLE_ERRORS as exc:
                 _reraise_if_fatal(exc)
                 # The filing itself is already saved, and the filings after
                 # this one still need fetching -- one bad exhibit is not
@@ -492,8 +500,9 @@ def main() -> None:
     parser.add_argument("--save-dir", help="If set, download each filing and save it as a PDF here")
     parser.add_argument("--exhibits", default=DEFAULT_EXHIBITS,
                         help="Comma-separated exhibit types to save alongside each "
-                             f"filing (default: {DEFAULT_EXHIBITS}; the annual report "
-                             "some filers incorporate by reference)")
+                             f"10-K (default: {DEFAULT_EXHIBITS}; the annual report "
+                             "some filers incorporate by reference). Other forms "
+                             "are saved without exhibits.")
     parser.add_argument("--no-exhibits", action="store_true",
                         help="Save only each filing's primary document")
     parser.add_argument("--user-agent",

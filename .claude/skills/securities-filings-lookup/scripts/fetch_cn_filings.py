@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -34,7 +35,7 @@ import urllib.request
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from naming import filing_name
+from naming import claim_name, filing_name
 from net_errors import HostRefused, run
 from pdf_utils import save_filing_as_pdf
 
@@ -106,6 +107,7 @@ KEYWORDS = {
 # (code prefix, plate param, column param)
 EXCHANGE_BY_PREFIX = [
     ("688", "sh", "sse"),
+    ("900", "sh", "sse"),  # Shanghai B-shares
     ("6", "sh", "sse"),
     ("300", "sz", "szse"),
     ("301", "sz", "szse"),
@@ -179,6 +181,22 @@ def fetch(code: str, kind: str, limit: int) -> list[dict]:
     return rows
 
 
+CHINA_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def announcement_date(millis) -> str:
+    """CNINFO's epoch-millisecond announcementTime as YYYY-MM-DD in China.
+
+    Empty when absent or unreadable, so the file name just loses the date
+    instead of inventing one.
+    """
+    try:
+        moment = datetime.datetime.fromtimestamp(int(millis) / 1000, CHINA_TZ)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    return moment.strftime("%Y-%m-%d")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("code", help="6-digit A-share code, e.g. 600519")
@@ -199,7 +217,8 @@ def main() -> None:
 
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
-        for idx, r in enumerate(rows):
+        used_names: set[str] = set()
+        for r in rows:
             if not r["url"]:
                 print(f"(no file URL) {r['title']}")
                 continue
@@ -210,9 +229,16 @@ def main() -> None:
             })
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = resp.read()
+            # The announcement date, not the row's rank: a rank changes the
+            # moment a newer filing appears, so the same document would be
+            # saved under a new name each run. Two announcements can still
+            # share a title and a day (corrections), hence claim_name.
             out_path = os.path.join(
                 args.save_dir,
-                filing_name(args.code, r["title"], f"{idx:02d}"))
+                claim_name(used_names,
+                           filing_name(args.code, r["title"],
+                                       announcement_date(r["time_ms"])),
+                           os.path.basename(r["url"])))
             # CNINFO documents are already native PDFs, so this is a
             # direct byte save; the real-browser render is a defensive
             # fallback, and it needs the same UA and the bytes we hold.

@@ -55,13 +55,19 @@ UNSUPPORTED_NOTE = {
         "as TSM). See the Taiwan section of README.md."),
 }
 
+# Tokyo has issued codes of three digits and a letter since 2024 (285A =
+# Kioxia, 186A = Astroscale). That is a mixed letter/digit shape too, and it
+# has to be claimed before the SGX rule below does.
+TSE_ALPHANUMERIC_CODE = re.compile(r"^\d{3}[A-Z]$")
+
 # SGX trading codes are three or four alphanumerics in every combination.
 # Counted from the live directory (1,333 securities, 2026-09; the total
 # drifts as instruments list and expire): 747 are pure letters, which is
 # also the shape of a US ticker; 27 are pure digits, which is also the shape
-# of a Hong Kong code; and 559 mix the two. No other venue in this skill
-# uses that mixed shape, so those can be claimed outright -- the other two
-# shapes keep their existing venue and get a note instead.
+# of a Hong Kong code; and 559 mix the two. Apart from Tokyo's newer codes
+# (above) and a few London EPICs (3IN, N91), no venue in this skill uses that
+# mixed shape, so SGX is the default guess for it -- the other two shapes
+# keep their existing venue and get a note instead.
 SGX_MIXED_CODE = re.compile(r"^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{3,4}$")
 
 
@@ -100,6 +106,9 @@ def identify(raw: str) -> dict:
     if re.fullmatch(r"\d{6}", t):
         if t.startswith("688"):
             return _result(raw, "shanghai", t, note="STAR Market (科创板)")
+        if t.startswith("900"):
+            return _result(raw, "shanghai", t,
+                           note="Shanghai B-share (B股, quoted in US dollars)")
         if t[0] == "6":
             return _result(raw, "shanghai", t)
         if t.startswith(("300", "301")):
@@ -125,12 +134,21 @@ def identify(raw: str) -> dict:
                  "Singapore.",
         )
 
+    if TSE_ALPHANUMERIC_CODE.match(t):
+        return _result(
+            raw, "tokyo", t,
+            note="Assumed Tokyo: the TSE has issued three-digit-plus-letter "
+                 "codes since 2024 (285A = Kioxia). SGX uses mixed codes too, "
+                 "so use .T for Tokyo or .SI for Singapore to remove the "
+                 "doubt.")
+
     if SGX_MIXED_CODE.match(t):
         return _result(
             raw, "singapore", t,
-            note="Codes mixing letters and digits like this are SGX trading "
-                 "codes and nothing else in this skill's venues; add the .SI "
-                 "suffix to be explicit.")
+            note="Codes mixing letters and digits like this are most likely "
+                 "SGX trading codes, but a London EPIC (3IN, N91) has the "
+                 "same shape; add .SI for Singapore or .L for London to be "
+                 "explicit.")
 
     return _result(
         raw, "unknown", t,

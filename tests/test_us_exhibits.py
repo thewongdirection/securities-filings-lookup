@@ -15,6 +15,7 @@ including the `/ix?doc=` viewer links that inline-XBRL documents carry.
 """
 from __future__ import annotations
 
+import http.client
 import io
 import sys
 import tempfile
@@ -225,6 +226,56 @@ class SaveRowsTest(unittest.TestCase):
             saved = us.save_rows(rows, "IBM", self.dir, [])
 
         self.assertEqual([Path(p).name for p in saved], ["IBM_10-K_2025-02-25.pdf"])
+        self.assertIn("could not be saved", out.getvalue())
+
+    def test_a_document_that_fails_in_any_way_does_not_abandon_the_rest(self):
+        # Neither failure is an OSError: a body cut short is an
+        # HTTPException, and a page the browser cannot load is a RenderError
+        # (once a Playwright error). Both used to end the whole run.
+        failures = {
+            "truncated download": lambda url: http.client.IncompleteRead(b"123"),
+            "garbled reply": lambda url: http.client.BadStatusLine("garbage"),
+        }
+        for label, make in failures.items():
+            with self.subTest(failure=label):
+                rows = [dict(ROW, url="https://www.sec.gov/Archives/x/bad.htm"),
+                        dict(ROW, filed="2025-02-25", accession="000005114325000010",
+                             accession_dashed="0000051143-25-000010",
+                             url="https://www.sec.gov/Archives/x/fine.htm")]
+
+                def get(url, make=make):
+                    if url.endswith("bad.htm"):
+                        raise make(url)
+                    return self._fake_get(url)
+
+                with mock.patch.object(us, "_get", get), \
+                        mock.patch.object(us, "save_filing_as_pdf",
+                                          side_effect=lambda u, d, o, **k: self._fake_render(u, o)), \
+                        mock.patch.object(us.time, "sleep"), \
+                        mock.patch("sys.stdout", io.StringIO()) as out:
+                    saved = us.save_rows(rows, "IBM", self.dir, [])
+                self.assertEqual([Path(p).name for p in saved],
+                                 ["IBM_10-K_2025-02-25.pdf"])
+                self.assertIn("could not be saved", out.getvalue())
+
+    def test_a_page_the_browser_cannot_render_does_not_abandon_the_rest(self):
+        rows = [dict(ROW), dict(ROW, filed="2025-02-25",
+                                accession="000005114325000010",
+                                accession_dashed="0000051143-25-000010")]
+        renders = []
+
+        def render(url, data, out_path, **kwargs):
+            renders.append(out_path)
+            if len(renders) == 1:
+                raise pdf_utils.RenderError("the browser could not render it")
+            return self._fake_render(url, out_path)
+
+        with mock.patch.object(us, "_get", self._fake_get), \
+                mock.patch.object(us, "save_filing_as_pdf", side_effect=render), \
+                mock.patch.object(us.time, "sleep"), \
+                mock.patch("sys.stdout", io.StringIO()) as out:
+            saved = us.save_rows(rows, "IBM", self.dir, [])
+        self.assertEqual(len(saved), 1)
         self.assertIn("could not be saved", out.getvalue())
 
     def test_a_rate_limit_stops_the_run_instead_of_deepening_it(self):

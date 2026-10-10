@@ -13,8 +13,6 @@ Given a ticker, this skill:
 2. Pulls filings from the correct authoritative regulator/exchange source — never a paywalled aggregator when a free, primary source exists.
 3. Saves the actual filing document as a PDF — the original, not a reconstruction of its content. See Step 3 below for exactly what that means and where it doesn't work.
 
-Before any of that, it updates itself (Step 0) so the workflow, the reference docs, and the scripts you run are the current published ones rather than whatever was on disk from last time.
-
 ## Why the venue matters
 
 "Financial filings" means something different depending on where a company is listed:
@@ -23,7 +21,7 @@ Before any of that, it updates itself (Step 0) so the workflow, the reference do
 - **Hong Kong (HKEX / HKEXnews)** — Annual Report + Interim Report, plus a continuous stream of announcements (results, connected transactions, notifiable transactions). No mandatory quarterly reporting for most main-board issuers since 2019.
 - **Mainland China A-shares (CNINFO, covering SSE + SZSE)** — 年度报告 (annual report), 半年度报告 (interim report), and other disclosures, almost always Chinese-only.
 - **London (FCA National Storage Mechanism)** — annual reports (modern ones as ESEF zip packages, not PDFs), circulars, prospectuses; RNS is the news wire on top. English natively.
-- **Japan (TDnet + EDINET)** — 決算短信 (earnings) and timely disclosures on TDnet (keyless, ~1 month retention); 有価証券報告書 (annual securities reports) on EDINET, whose API needs a free key. Japanese; big ADRs (Toyota, Sony) file English 20-Fs with the SEC. 4-digit codes, ambiguous with HK when bare.
+- **Japan (TDnet + EDINET)** — 決算短信 (earnings) and timely disclosures on TDnet (keyless, ~1 month retention); 有価証券報告書 (annual securities reports) on EDINET, whose API needs a free key. Japanese; big ADRs (Toyota, Sony) file English 20-Fs with the SEC. 4-character codes (`7203`, or `285A`-style for listings since 2024), ambiguous with HK or SGX when bare.
 - **Singapore (SGX / SGXNet)** — Annual Report plus a half-year results announcement and a continuous SGXNet stream; like Hong Kong, no mandatory quarterly reporting for most issuers since 2020. English natively. Trading codes are three or four alphanumerics (`D05`, `Z74`, `A17U`), which overlap with US tickers and HK codes when bare — `.SI` removes the doubt. An annual report announcement usually carries several documents (the report plus a letter to shareholders or AGM circular), and SGX publishes no listing API, so finding *which* announcement is the one manual step.
 - **Frankfurt / Germany (Unternehmensregister / Bundesanzeiger)** — browse-only official sources; the pragmatic route is the company's IR-site annual report (usually official English) or the SEC 20-F for NYSE-listed names like SAP. No script.
 
@@ -44,30 +42,9 @@ that plainly and offer the routes that do work:
 
 Guessing the wrong venue wastes time searching for filings that were never going to be there. Confirm first, then fetch.
 
-## Step 0 — Update the skill, then use what you just pulled
+## Running the scripts
 
-**Every `scripts/...` path in this file is relative to the skill's own directory**, which is named for you when the skill loads (and is `~/.claude/skills/securities-filings-lookup` for a personal install, or `.claude/skills/securities-filings-lookup/` inside a project). Your shell's working directory is the user's project, not the skill, so run each command from the skill directory or spell the path out in full — otherwise Step 0 silently does nothing, or worse, runs some unrelated `scripts/` file that happens to exist in the user's repo.
-
-Before the first lookup of a request, bring this skill's own checkout up to date:
-
-```
-python <skill-dir>/scripts/update_skill.py
-```
-
-It fast-forwards the checkout this skill lives in to `origin`'s latest commit on the current branch, then prints a short status block. Act on its `status:` line:
-
-- **`updated`** — the files on disk just changed under you. **Re-read `SKILL.md` from disk before going further**, along with whichever `references/*.md` the request needs, and run the scripts as they are on disk. What was loaded into the conversation when the skill triggered is the previous version; the `files:` line says what changed.
-- **`up-to-date`** — carry on.
-- **`update-available`** — only with `--check-only`; run it again without the flag to actually take the update.
-- **`skipped`** — carry on with the local copy, which is the best available version, whatever the reason. The `reason:` line says which:
-  - *Nothing to update from*: `not-a-git-checkout` (zip or marketplace install), `no-origin-remote`, `no-remote-branch`, `offline`, `git-unavailable`.
-  - *Not this skill's repository*: `foreign-remote` (vendored inside another project), `unrelated-repo` (the enclosing repo doesn't track this skill — a dotfiles checkout, say), `not-a-skill-directory`.
-  - *Your copy has moved on*: `local-changes`, `local-ahead`, `diverged`, `detached-head`.
-  - *Something went wrong mid-update*: `merge-failed`, `unreadable-refs`, `unsafe-branch-name`, `no-branch`.
-
-  Mention it to the user only when they could act on it — `local-changes`, `local-ahead`, `diverged`, `no-origin-remote`, `unrelated-repo` — and never let any of it block the lookup. An unfamiliar reason gets the same response: use the local copy and carry on.
-
-Run it **once per request**, not before each script call, and never in a loop. It is deliberately timid: fast-forward only, never on a dirty working tree, never on a repo that isn't this skill's, and it exits 0 even when it fails, so a self-update problem can never stop the filings work the user actually asked for.
+**Every `scripts/...` path in this file and in `references/*.md` is relative to the skill's own directory**, which is named for you when the skill loads (for example `~/.claude/skills/securities-filings-lookup` for a personal install, `.claude/skills/securities-filings-lookup/` inside a project, or a marketplace's plugin directory). Your shell's working directory is the user's project, not the skill, so invoke scripts by their full path (`python <skill-dir>/scripts/identify_venue.py <ticker>`) rather than `cd`-ing into the skill — that way output paths such as `--save-dir ./filings` still resolve against the user's project. A bare `scripts/...` path silently does nothing, or worse, runs some unrelated `scripts/` file that happens to exist in the user's repo.
 
 ## Step 1 — Identify the ticker and its listing venue
 
@@ -88,7 +65,7 @@ python scripts/resolve_name.py "Tencent"
 python scripts/resolve_name.py "Tencent" --venues us,hk
 ```
 
-It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, TWSE OpenAPI, FCA NSM, JPX's English company list for Japan) and prints candidates as `venue code name`. A venue that cannot answer returns an `ERROR` row and the others still report — the UK row currently always errors, because the FCA retired that search index. Germany has no public directory — resolve German names by web search. Then:
+It queries each venue's own directory (SEC company_tickers, HKEX name lookup, CNINFO topSearch, FCA NSM, JPX's English company list for Japan, SGX's securities directory) and prints candidates as `venue code name`. A venue that cannot answer returns an `ERROR` row and the others still report — the UK row currently always errors, because the FCA retired that search index. Germany has no public directory — resolve German names by web search. Then:
 
 - **Confirm with the user before proceeding** (AskUserQuestion where available): list the plausible candidates with the closest match first and marked as the default. **If no answer arrives within ~15 seconds** or the session is non-interactive, **proceed with the closest match** — say so in the question and in your reply.
 - Filter obvious noise before asking: HK results include listed *notes/bonds* (names like "TENCENT N2801") — the plain equity is the short bare name; UK results may lack a symbol.
@@ -176,7 +153,7 @@ playwright install chromium
 
 If Chromium is already on the machine but Playwright refuses to launch it — a pre-provisioned container ships one build while the installed Playwright pins another, which is what Claude Code on the web does — the scripts fall back to the Chromium under `PLAYWRIGHT_BROWSERS_PATH` by themselves. Set `SKILL_CHROMIUM_PATH=/path/to/chrome` to force a specific binary. If no browser can be found at all, the script says so and gives the filing's URL; it never substitutes a reconstruction.
 
-**In claude.ai's sandbox: none of this works for any venue, and that's worth stating plainly rather than working around.** Verified directly: `web_fetch` always extracts/transforms content — including for PDFs. Setting `web_fetch_pdf_extract_text=false` was expected to return raw bytes for an already-PDF filing (the CNINFO/HKEX case), but tested against two real CNINFO PDFs (one 143 pages, one 4 pages) and both came back as extracted text either way, not base64. An earlier version of this doc claimed the binary-mode path let claude.ai retrieve HK/China filings byte-faithfully — that claim was untested and turned out to be wrong; it's corrected here. Combined with the earlier finding that even headless Chromium hits the same network allowlist wall as `bash` (a live `403 Host not in allowlist: www.sec.gov`), there is no tool available in this environment, for any of the three venues, that returns a filing's original bytes. The honest response is to give the person the direct URL so they can open or download it themselves — not to hand over extracted text or a reconstruction and imply it's the same thing.
+**In claude.ai's sandbox: none of this works for any venue, and that's worth stating plainly rather than working around.** Verified directly: `web_fetch` always extracts/transforms content — including for PDFs. Setting `web_fetch_pdf_extract_text=false` was expected to return raw bytes for an already-PDF filing (the CNINFO/HKEX case), but tested against two real CNINFO PDFs (one 143 pages, one 4 pages) and both came back as extracted text either way, not base64. An earlier version of this doc claimed the binary-mode path let claude.ai retrieve HK/China filings byte-faithfully — that claim was untested and turned out to be wrong; it's corrected here. Combined with the earlier finding that even headless Chromium hits the same network allowlist wall as `bash` (a live `403 Host not in allowlist: www.sec.gov`), there is no tool available in this environment, for any venue, that returns a filing's original bytes. The honest response is to give the person the direct URL so they can open or download it themselves — not to hand over extracted text or a reconstruction and imply it's the same thing.
 
 This is a real limitation of the current environment, not a solvable formatting problem. It works correctly in Claude Code / Claude Desktop, where the scripts download raw bytes directly and this was verified with `cmp` to be byte-for-byte identical to the source.
 

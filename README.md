@@ -30,24 +30,17 @@ git clone https://github.com/thewongdirection/securities-filings-lookup.git $env
 
 On claude.ai instead: download this repo as a zip (Code → Download ZIP) and upload it under Settings → Capabilities → Skills.
 
-### Staying up to date
+### Updating
 
-The skill updates itself. Every time it runs, its first step is:
+The skill does not update itself — whatever installed it is responsible for new versions:
 
-```bash
-python scripts/update_skill.py
-```
+- **A marketplace install** is updated through the marketplace's own update mechanism.
+- **A `git clone`** is updated with `git pull` in the skill directory.
+- **A zip upload** is replaced by uploading a newer zip.
 
-which fast-forwards the clone to the latest published commit and, when anything changed, re-reads `SKILL.md` and the reference docs from disk before doing the lookup — so a session always uses the current version, not whatever was cloned months ago.
+The skill never changes its own code or instructions while a lookup runs, so a checkout with local edits behaves exactly as it is on disk.
 
-It is deliberately conservative, and skips the update (rather than doing anything surprising) when the checkout has uncommitted edits, has local or diverged commits, is on a detached HEAD, isn't a git clone at all, can't reach the network, or sits inside a repository that isn't this skill's — a copy dropped into a dotfiles or project repo is never pulled. The status block names the reason in every case. It never merges, never rebases, and never discards local work; the worst case is that it does nothing and the existing copy is used. Nothing about a failed update stops the filings lookup.
-
-Two consequences worth knowing:
-
-- **Zip / marketplace installs don't self-update** (there's no git remote to check). Re-download to upgrade, or install via `git clone` as above.
-- **If you've edited your copy**, the skill stops updating and says so. Commit your changes on a branch, or keep them and accept that you're pinned to that version.
-
-`python scripts/update_skill.py --check-only` reports whether an update exists without taking it.
+Settings the skill remembers (`sec_user_agent.txt`, `save_location.txt`) live untracked inside the skill directory, so an update that replaces the directory (a marketplace or zip update, say) may drop them; the skill then simply asks again. Set `SEC_USER_AGENT` in your shell profile to keep the SEC contact durable.
 
 ## Prerequisites
 
@@ -70,7 +63,7 @@ Two consequences worth knowing:
   SEC's primary documents are HTML; the skill prints them to PDF with a real headless browser. HK and China filings are native PDFs and need nothing extra.
   Where a Chromium is already installed but Playwright pins a different build (Claude Code on the web), the scripts fall back to the browser under `PLAYWRIGHT_BROWSERS_PATH`; `SKILL_CHROMIUM_PATH` forces a specific binary.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
-- **For issuers whose TLS chain is incomplete** (various IR-site downloads): `pip install certifi` — some hosts' chains are missing from default trust stores; the scripts pick up certifi automatically.
+- **For issuers whose TLS chain is incomplete** (various IR-site downloads): `pip install certifi` — some hosts' chains are missing from default trust stores; `save_filing.py`, the Japan and London fetchers and the name resolver pick it up automatically.
 - **For Japan name lookup**: `pip install openpyxl` (JPX's company directory is an .xlsx; it used to be .xls, and that URL now 404s). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
 
 ## Network access (cloud containers, proxies, locked-down networks)
@@ -160,9 +153,8 @@ claude.ai/code → the cloud icon showing the environment name (the row above th
 
 Keep **Also include default list of common package managers** ticked: the optional `playwright`, `certifi`, `pypdf` and `openpyxl` installs come from PyPI. Wildcards work too (`*.cninfo.com.cn`, `*.hkexnews.hk`, `*.sgx.com`), though `api.data.fca.org.uk` is two levels deep so it is safer spelled out. **Full** network access covers everything without a list.
 
-Three things that catch people out:
+Two things that catch people out:
 
-- **GitHub needs no entry.** Repository traffic — including this skill's own [self-update](#staying-up-to-date) — goes through a separate GitHub proxy, independent of the allowlist. The skill keeps updating itself even with network access set to **None**.
 - **CNINFO is reached over plain HTTP.** The mainland China endpoints are `http://` URLs, and a proxy that only tunnels HTTPS (`CONNECT`) can still refuse them after the domain is allowed. If China filings fail with the domain allowlisted, that is why.
 - **Frankfurt / Germany can't be pinned down.** Even with the optional block above, that venue needs whichever host the issuer publishes on. Add them per company, or use **Full**.
 
@@ -174,7 +166,7 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup MSFT          # US
 /securities-filings-lookup BRK.B         # US class shares (BRK-B also works)
 /securities-filings-lookup 0700.HK       # Hong Kong (also: 700, 9988.HK)
-/securities-filings-lookup 600519:SS     # Shanghai (also: 600519, 600519.SS)
+/securities-filings-lookup 600519.SS     # Shanghai (also: 600519)
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
 /securities-filings-lookup AZN.L         # London
 /securities-filings-lookup 7203.T        # Tokyo
@@ -189,7 +181,6 @@ What you get back: the company resolved to its official identifier (CIK / stock 
 
 ## Default behaviors
 
-- **The skill self-updates before each request** — it fast-forwards its own clone, then uses the freshly pulled instructions and scripts (see [Staying up to date](#staying-up-to-date)). Uncommitted local edits, a missing network, or a non-git install just skip the update.
 - **PDFs are delivered automatically** — for every document a request resolves to (annual/quarterly report, requested forms, and each version in dual-listed/non-English cases), the skill saves the PDF to your remembered folder and hands it back, rather than only listing links and waiting to be asked. It scopes to what you actually want, not the whole tail of routine housekeeping filings (Form 4s, disclosure returns), and skips anything already retrieved earlier in the conversation.
 - **Dual-listed companies** (A+H shares, US-listed Chinese ADRs with HK listings, dual primaries): the skill asks which market's filings you want — but **if you don't answer within ~15 seconds** (or the session is non-interactive), **it downloads all versions** and lets you narrow afterwards.
 - **Non-English filings** (mainland A-shares, mostly): you always get **the original plus an English version** — the company's official English translation if one exists, otherwise the dual-listed English filing (H-share report / 20-F), otherwise a clearly-labelled unofficial translation of the official summary (摘要).
@@ -210,7 +201,7 @@ The save folder is **remembered per machine** in `save_location.txt` next to `SK
 2. The folder in `save_location.txt`
 3. If neither exists yet, the skill **asks you once** and records the answer
 
-Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2025-07-30.pdf`, `600519_00_贵州茅台2025年年度报告.pdf`) — so the folder stays sortable.
+Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2025-07-30.pdf`, `600519_贵州茅台2025年年度报告_2026-04-01.pdf`) — so the folder stays sortable.
 
 ## Run it from your phone
 
@@ -220,11 +211,14 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 ## What's inside
 
 - `SKILL.md` — the skill definition, workflow, and default behaviors
-- `scripts/update_skill.py` — the Step 0 self-update: fast-forward-only, never on a dirty tree
 - `scripts/identify_venue.py` — offline ticker→venue classifier (suffixes, bare codes, class shares)
 - `scripts/fetch_us_filings.py` — SEC EDGAR listing + PDF save (handles SEC's gzip responses, bot detection, rate-limit caching)
 - `scripts/fetch_cn_filings.py` — CNINFO listing + PDF save (handles the `code,orgId` query requirement and server-side title search)
+- `scripts/fetch_uk_filings.py` / `scripts/fetch_jp_filings.py` / `scripts/fetch_sg_filings.py` — London (FCA NSM), Tokyo (TDnet + EDINET) and Singapore (SGXNet) listing + save
+- `scripts/resolve_name.py` — company name → candidate tickers, from each venue's own directory
 - `scripts/save_filing.py` / `scripts/pdf_utils.py` — save any filing URL as the original PDF
+- `scripts/sec_identity.py` — the SEC contact address: where it is read from, how it is validated
+- `scripts/naming.py` / `scripts/disk_cache.py` — safe, collision-free file names, and the per-user directory cache
 - `references/` — per-venue mechanics, URL patterns, and documented dead ends so they don't get re-tried
 - `scripts/net_errors.py` — turns rate limits, blocked hosts and TLS failures into one plain line instead of a traceback
 - `scripts/sync_project_skill.py` — mirrors the skill into `.claude/skills/` so the two copies can't drift
@@ -236,20 +230,21 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 python -m unittest discover -s tests      # every offline regression test
 python scripts/sync_project_skill.py      # after editing SKILL.md / scripts / references
 
-# all seven markets against the live regulators, 10 issuers sampled per market
+# all seven markets against the live regulators, 25 issuers sampled per market
 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live -v
 SKILL_LIVE_SEED=7 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live
 ```
 
-`tests/test_markets_live.py` samples ten issuers per venue from a larger pool on
+CI (`.github/workflows/tests.yml`) runs the offline suite and the mirror check on Python 3.10–3.13 for every pull request and every push to `main`; the live suite never runs there.
+
+`tests/test_markets_live.py` samples twenty-five issuers per venue from a larger pool on
 each run (the sample is printed; `SKILL_LIVE_SEED` makes a run reproducible) and
 asserts what a pass means for that venue: filings returned where the venue
 answers, "the window is empty" stated where TDnet's ~1 month has nothing, and the
-refusal named in its own words where a venue declines this client (TWSE from a
-datacentre IP) or its endpoint has been retired upstream (the FCA's NSM search
-index). No outcome may arrive as a traceback. It is skipped without
+retirement named in its own words where an endpoint has been retired upstream
+(the FCA's NSM search index). No outcome may arrive as a traceback. It is skipped without
 `SKILL_LIVE_TESTS=1`, so the default suite stays offline and deterministic.
 
 The repo root is the canonical skill; `.claude/skills/securities-filings-lookup/` is a generated mirror that lets Claude Code on the web load it as a project skill. `tests/test_skill_layout.py` fails if the two drift, so run the sync script before committing.
 
-The tests are pure standard library and never touch a regulator's server: network responses are stubbed, and the self-update tests run against throwaway local git repositories. Anything that needs live access to SEC/CNINFO/TWSE belongs in a manual check, not the suite.
+The default suite is pure standard library and offline: network responses are stubbed. Only the opt-in live suite above talks to the regulators, and anything else that needs live access belongs in a manual check, not the default run.

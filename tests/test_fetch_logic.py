@@ -7,16 +7,20 @@ are not reachable from every environment and must never gate a test run.
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
 import http.client
 import io
 import json
 import os
 import socket
 import ssl
+import subprocess
 import sys
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -103,6 +107,34 @@ CN_RESPONSE = {
 }
 
 
+class TickerDirectoryTest(unittest.TestCase):
+    """The ticker->CIK download is served from www.sec.gov, the host that
+    actually gets blocked -- with a 200 and an HTML page."""
+
+    def test_a_block_page_is_a_refusal_not_a_json_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(fetch_us_filings.disk_cache, "cache_dir",
+                                  return_value=tmp), \
+                mock.patch.object(fetch_us_filings, "_get",
+                                  return_value=b"<html>Request Rate Threshold</html>"):
+            with self.assertRaises(net_errors.HostRefused) as caught:
+                fetch_us_filings.resolve_cik("AAPL")
+            self.assertEqual(os.listdir(tmp), [],
+                             "a refusal page must never be cached as the directory")
+        self.assertIn("not JSON", str(caught.exception))
+
+    def test_a_good_directory_still_resolves_and_is_cached(self):
+        body = json.dumps({"0": {"cik_str": 320193, "ticker": "AAPL",
+                                 "title": "Apple Inc."}}).encode()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(fetch_us_filings.disk_cache, "cache_dir",
+                                  return_value=tmp), \
+                mock.patch.object(fetch_us_filings, "_get", return_value=body):
+            self.assertEqual(fetch_us_filings.resolve_cik("aapl"),
+                             (320193, "Apple Inc."))
+            self.assertEqual(os.listdir(tmp), ["sec_company_tickers.json"])
+
+
 class CnFilingSelectionTest(unittest.TestCase):
     def _fetch(self, kind, limit=10):
         payload = json.dumps(CN_RESPONSE).encode()
@@ -150,6 +182,65 @@ class JpParsingTest(unittest.TestCase):
         self.assertEqual(code, "72030")      # TDnet uses the 5-digit form
         self.assertEqual(link, "140120260501.pdf")
         self.assertIn("決算短信", title)
+
+
+class EdinetRequestTest(unittest.TestCase):
+    """EDINET's API key rides in the query string, so anything that makes
+    http.client echo the request path -- a malformed date did -- printed
+    the key into the transcript."""
+
+    KEY = "SECRETKEY123"
+
+    def test_only_real_iso_dates_are_accepted(self):
+        for good in ("2026-06-24", "2025-12-31"):
+            with self.subTest(good=good):
+                self.assertEqual(fetch_jp_filings.edinet_date(good), good)
+        for bad in ("June 24", "2026-6-4", "20260624", "2026-13-01",
+                    "2026-02-30", "2026-06-24&x=1", "", "2026-06-24 "):
+            with self.subTest(bad=bad):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    fetch_jp_filings.edinet_date(bad)
+
+    def test_every_query_value_is_encoded_the_key_included(self):
+        url = fetch_jp_filings.edinet_url(
+            "documents.json", "a&b=c d", date="2026-06-24", type=2)
+        self.assertEqual(urllib.parse.urlsplit(url).path, "/api/v2/documents.json")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertEqual(query["Subscription-Key"], ["a&b=c d"])
+        self.assertEqual(query["date"], ["2026-06-24"])
+        self.assertNotIn(" ", url)
+
+    def test_a_malformed_date_never_prints_the_key(self):
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "fetch_jp_filings.py"),
+             "7203", "--edinet-date", "June 24"],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "EDINET_API_KEY": self.KEY})
+        self.assertEqual(proc.returncode, 2)
+        self.assertNotIn(self.KEY, proc.stdout + proc.stderr)
+        self.assertIn("YYYY-MM-DD", proc.stderr)
+
+    def test_a_hostile_doc_id_stays_in_the_url_path_and_the_save_directory(self):
+        listing = json.dumps({"results": [{
+            "docID": "../evil", "secCode": "72030",
+            "filerName": "Toyota", "docDescription": "annual"}]}).encode()
+        calls = []
+
+        def fake_get(url):
+            calls.append(url)
+            return listing if len(calls) == 1 else b"%PDF-1.4\nbody"
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"EDINET_API_KEY": self.KEY}), \
+                mock.patch.object(fetch_jp_filings, "_get", fake_get), \
+                contextlib.redirect_stdout(io.StringIO()):
+            save_dir = os.path.join(tmp, "out")
+            fetch_jp_filings.edinet("7203", "2026-06-24", save_dir)
+            saved = os.listdir(save_dir)
+            self.assertEqual(len(saved), 1)
+            self.assertNotIn(os.sep, saved[0])
+            self.assertEqual(os.listdir(tmp), ["out"])
+        self.assertIn("documents/..%2Fevil?", calls[1])
 
 
 class PdfUtilsTest(unittest.TestCase):
@@ -262,6 +353,26 @@ class PdfUtilsTest(unittest.TestCase):
             # "chromium-999" sorts after "chromium-1194" as text.
             self.assertIn("chromium-1194", found)
 
+    def test_the_build_is_found_whatever_the_platform_layout(self):
+        # On macOS the binary sits four levels down inside Chromium.app, so
+        # the directory two above it is "Contents" and every build scored -1.
+        layouts = {
+            "linux": "chromium-{b}/chrome-linux/chrome",
+            "mac": "chromium-{b}/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+            "windows": "chromium-{b}/chrome-win/chrome.exe",
+        }
+        for name, layout in layouts.items():
+            with self.subTest(platform=name), \
+                    tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "pw-9999"  # digits in the root must not count
+                for build in (999, 1194):
+                    binary = root / layout.format(b=build)
+                    binary.parent.mkdir(parents=True)
+                    binary.write_text("x", encoding="utf-8")
+                with mock.patch.dict("os.environ",
+                                     {"PLAYWRIGHT_BROWSERS_PATH": str(root)}):
+                    self.assertIn("chromium-1194", pdf_utils._bundled_chromium())
+
     def test_bundled_chromium_is_none_without_a_browsers_path(self):
         with mock.patch.dict("os.environ", {"PLAYWRIGHT_BROWSERS_PATH": "/nope/nowhere"}):
             self.assertIsNone(pdf_utils._bundled_chromium())
@@ -272,6 +383,96 @@ class PdfUtilsTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {pdf_utils.CHROMIUM_PATH_ENV: "/my/chrome"}):
             pdf_utils._launch_chromium(playwright)
         playwright.chromium.launch.assert_called_once_with(executable_path="/my/chrome")
+
+
+class RenderFailureTest(unittest.TestCase):
+    """A page the browser cannot load must be a skippable fetch failure:
+    Playwright's own exception is neither an OSError nor anything run()
+    catches, so it used to end a batch as a traceback."""
+
+    class FakePlaywrightError(Exception):
+        pass
+
+    def _render(self, goto_error):
+        import contextlib
+        import types
+
+        page = mock.Mock()
+        page.goto.side_effect = goto_error
+        browser = mock.Mock()
+        browser.new_page.return_value = page
+        sync_api = types.ModuleType("playwright.sync_api")
+        sync_api.Error = self.FakePlaywrightError
+        sync_api.sync_playwright = lambda: contextlib.nullcontext(mock.Mock())
+        modules = {"playwright": types.ModuleType("playwright"),
+                   "playwright.sync_api": sync_api}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(sys.modules, modules), \
+                mock.patch.object(pdf_utils, "_launch_chromium",
+                                  return_value=browser):
+            try:
+                pdf_utils.render_url_to_pdf("https://www.sec.gov/x.htm",
+                                            os.path.join(tmp, "x.pdf"))
+            finally:
+                browser.close.assert_called_once()  # even when it fails
+
+    def test_a_navigation_failure_is_a_render_error(self):
+        with self.assertRaises(pdf_utils.RenderError) as caught:
+            self._render(self.FakePlaywrightError("Timeout 120000ms exceeded"))
+        self.assertIsInstance(caught.exception, OSError)
+        self.assertIn("Timeout 120000ms exceeded", str(caught.exception))
+        self.assertIn("https://www.sec.gov/x.htm", str(caught.exception))
+
+    def test_a_render_error_is_reported_plainly_by_run(self):
+        def main():
+            raise pdf_utils.RenderError("the browser could not render x")
+
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+            net_errors.run(main)
+        self.assertNotIn("Traceback", stderr.getvalue())
+        self.assertIn("could not render", stderr.getvalue())
+
+    def test_a_genuine_bug_is_not_swallowed(self):
+        # Only Playwright's own errors are translated; anything else keeps
+        # its traceback so it can be debugged.
+        with self.assertRaises(ZeroDivisionError):
+            self._render(ZeroDivisionError("bug"))
+
+
+class SubresourceUserAgentTest(unittest.TestCase):
+    """The declared SEC contact is a person's address. A filing that
+    hotlinks an image from a company web server -- possibly over plain
+    http -- must not hand it to that host."""
+
+    PAGE = "https://www.sec.gov/Archives/edgar/data/1/x.htm"
+    CONTACT = "Some Person person@realdomain.com"
+
+    def _ua(self, url):
+        return pdf_utils.subresource_user_agent(url, self.PAGE, self.CONTACT)
+
+    def test_the_regulators_own_hosts_get_the_contact(self):
+        for url in ("https://www.sec.gov/images/a.gif",
+                    "https://data.sec.gov/x.json",
+                    "http://www.sec.gov/old/inline.gif"):
+            with self.subTest(url=url):
+                self.assertEqual(self._ua(url), self.CONTACT)
+
+    def test_a_third_party_host_never_sees_the_contact(self):
+        for url in ("http://cdn.company.example/logo.gif",
+                    "https://tracker.example.net/pixel.png",
+                    "https://sec.gov.evil.example/a.gif",
+                    "https://notsec.gov.example/a.gif",
+                    "data:image/gif;base64,R0lGOD"):
+            with self.subTest(url=url):
+                ua = self._ua(url)
+                self.assertEqual(ua, pdf_utils.THIRD_PARTY_UA)
+                self.assertNotIn("@", ua)
+
+    def test_the_interceptor_actually_uses_it(self):
+        # The helper is only worth having if the browser route calls it.
+        source = (ROOT / "scripts" / "pdf_utils.py").read_text(encoding="utf-8")
+        self.assertIn("subresource_user_agent(u, url, user_agent)", source)
 
 
 class SaveFilingTest(unittest.TestCase):
@@ -391,6 +592,35 @@ class NetworkErrorReportingTest(unittest.TestCase):
                 self.assertEqual(exit_.exception.code, 1)
                 self.assertNotIn("Traceback", stderr.getvalue())
                 self.assertIn("could not finish reading", stderr.getvalue())
+
+    def test_a_credential_echoed_in_an_error_is_masked(self):
+        # http.client.InvalidURL quotes the whole request path, key and all.
+        exc = http.client.InvalidURL(
+            "URL can't contain control characters. "
+            "'/api/v2/documents.json?date=June 24&type=2&Subscription-Key="
+            "SECRETKEY123' (found at least ' ')")
+        message = net_errors.explain(exc)
+        self.assertNotIn("SECRETKEY123", message)
+        self.assertIn("Subscription-Key=***", message)
+
+    def test_redaction_covers_the_usual_credential_parameters(self):
+        for param in ("Subscription-Key", "api_key", "apikey", "api-key",
+                      "key", "token"):
+            with self.subTest(param=param):
+                masked = net_errors.redact_secrets(f"GET /x?a=1&{param}=hunter2xyz&b=2")
+                self.assertNotIn("hunter2xyz", masked)
+                self.assertIn("a=1", masked)
+                self.assertIn("b=2", masked)
+
+    def test_redaction_leaves_ordinary_text_alone(self):
+        text = "monkey=banana turkey=sandwich Rate limited by sec.gov"
+        self.assertEqual(net_errors.redact_secrets(text), text)
+
+    def test_a_malformed_url_is_a_bad_argument_not_a_transient_cut(self):
+        message = net_errors.explain(http.client.InvalidURL("bad path"))
+        self.assertIn("malformed", message)
+        self.assertNotIn("transient", message)
+        self.assertNotIn("retry once", message)
 
     def test_a_truncated_reply_is_described_as_transient(self):
         message = net_errors.explain(http.client.IncompleteRead(b"1234"))

@@ -127,9 +127,10 @@ list and expire):
 |---|---|---|---|
 | Pure letters (`LVR`, `AZG`, `HLPD`) | 747 | 307 | a US ticker |
 | Pure digits (`533` = ABR, `541`, `570`) | 27 | 27 | a Hong Kong code |
-| Mixed (`D05`, `Z74`, `C6L`, `A17U`, `5E2`) | 559 | 414 | nothing else here |
+| Mixed (`D05`, `Z74`, `C6L`, `A17U`, `5E2`) | 559 | 414 | a London EPIC (`3IN`, `N91`) or, for three digits and a letter, a Tokyo code (`285A`) |
 
-So `identify_venue.py` claims the mixed shape for Singapore outright, and
+So `identify_venue.py` defaults the mixed shape to Singapore (after handing
+Tokyo's `\d{3}[A-Z]` codes to Tokyo, and saying so in the note), and
 leaves the other two with their existing venue — reassigning them would
 break every US ticker and every Hong Kong code — while saying in the note
 that SGX is a possibility. `.SI` (and `.SGX`) removes all doubt and is what

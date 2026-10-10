@@ -37,6 +37,8 @@ forces a specific binary.
 """
 from __future__ import annotations
 
+import urllib.parse
+
 from net_errors import SetupError
 
 
@@ -54,8 +56,40 @@ SETUP_HINT = (
 )
 
 
+# What a page's third-party subresources are fetched as. The declared
+# contact is a person's address; it belongs to the regulator that asked for
+# it, not to whatever host a filing happens to hotlink an image from.
+THIRD_PARTY_UA = "securities-filings-lookup"
+
+
+class RenderError(OSError):
+    """The browser could not load or print a page.
+
+    An OSError so the callers that already skip one unreachable document
+    (and net_errors.run) treat it like any other fetch failure, rather than
+    letting Playwright's own exception type end the batch as a traceback.
+    """
+
+
 def is_pdf_bytes(data: bytes) -> bool:
     return data[:5] == b"%PDF-"
+
+
+def _site(url: str) -> str:
+    """The last two host labels: sec.gov for www.sec.gov and data.sec.gov."""
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return ".".join(host.split(".")[-2:])
+
+
+def subresource_user_agent(url: str, page_url: str, user_agent: str) -> str:
+    """The User-Agent for one request the rendered page makes.
+
+    The page's own site gets the declared one. Anything else -- a logo
+    hotlinked from a company's web server, perhaps over plain http -- gets
+    a generic string, so the contact is never sent to a host it was not
+    given to.
+    """
+    return user_agent if _site(url) == _site(page_url) else THIRD_PARTY_UA
 
 
 def _bundled_chromium() -> str | None:
@@ -79,10 +113,12 @@ def _bundled_chromium() -> str | None:
 
     def build_number(path: str) -> int:
         # chromium-1194 sorts below chromium-999 as text, so compare
-        # numbers -- and anchor on the chromium directory itself, or a
-        # browsers root like /opt/pw-9999 scores every candidate the same.
-        match = re.search(r"chromium[_a-z]*-(\d+)", os.path.basename(
-            os.path.dirname(os.path.dirname(path))) or path)
+        # numbers -- and anchor on the chromium directory itself (the first
+        # component under the browsers root, whatever platform layout is
+        # below it), or a root like /opt/pw-9999 scores every candidate the
+        # same.
+        top = os.path.relpath(path, root).split(os.sep)[0]
+        match = re.fullmatch(r"chromium[_a-z]*-(\d+)", top)
         return int(match.group(1)) if match else -1
 
     for pattern in patterns:
@@ -154,6 +190,7 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
     import urllib.request
 
     try:
+        from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
     except ImportError:
         raise SetupError(SETUP_HINT) from None
@@ -162,7 +199,8 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
         out_path += ".pdf"
 
     def _fetch(u: str) -> tuple[bytes, str]:
-        req = urllib.request.Request(u, headers={"User-Agent": user_agent})
+        req = urllib.request.Request(u, headers={
+            "User-Agent": subresource_user_agent(u, url, user_agent)})
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read(), resp.headers.get("Content-Type", "application/octet-stream")
 
@@ -184,6 +222,9 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
             page.goto(url, wait_until="networkidle", timeout=120000)
             page.wait_for_timeout(wait_ms)  # let any late layout/JS settle
             page.pdf(path=out_path, print_background=True)
+        except PlaywrightError as exc:  # TimeoutError is a subclass
+            raise RenderError(
+                f"the browser could not render {url}: {exc}") from None
         finally:
             browser.close()
     return out_path

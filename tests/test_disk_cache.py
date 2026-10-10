@@ -196,6 +196,38 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(Path(self.path).read_bytes(), b'{"new": true}')
 
 
+class WindowsDirectoryTest(unittest.TestCase):
+    """Windows has no os.getuid and reports every directory as 0o777, so the
+    owner and mode checks rejected every directory: the cache never hit and
+    an empty temp directory leaked on each run."""
+
+    def test_a_windows_style_directory_is_accepted(self):
+        import types
+
+        info = types.SimpleNamespace(st_mode=stat.S_IFDIR | 0o777, st_uid=0)
+        fake_os = types.SimpleNamespace(lstat=lambda path: info)  # no getuid
+        with mock.patch.object(disk_cache, "os", fake_os):
+            self.assertTrue(disk_cache.is_private_dir("C:/Temp/x"))
+
+    def test_a_windows_symlink_or_file_is_still_refused(self):
+        import types
+
+        for mode in (stat.S_IFLNK | 0o777, stat.S_IFREG | 0o666):
+            with self.subTest(mode=oct(mode)):
+                info = types.SimpleNamespace(st_mode=mode, st_uid=0)
+                fake_os = types.SimpleNamespace(lstat=lambda path: info)
+                with mock.patch.object(disk_cache, "os", fake_os):
+                    self.assertFalse(disk_cache.is_private_dir("C:/Temp/x"))
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX permission bits")
+    def test_posix_still_refuses_a_group_writable_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp, 0o770)
+            self.assertFalse(disk_cache.is_private_dir(tmp))
+            os.chmod(tmp, 0o700)
+            self.assertTrue(disk_cache.is_private_dir(tmp))
+
+
 class VenueWiringTest(unittest.TestCase):
     """Every venue that caches a directory has to go through this module,
     or the fixed /tmp name comes back one script at a time."""

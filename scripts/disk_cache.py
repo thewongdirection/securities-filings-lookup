@@ -56,7 +56,12 @@ def is_private_dir(path: str) -> bool:
         return False
     if not stat.S_ISDIR(info.st_mode):
         return False
-    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+    if not hasattr(os, "getuid"):
+        # Windows reports every directory as 0o777 and has no owner to
+        # compare, so the checks below would reject every directory and the
+        # cache would never hit. Its per-user %TEMP% is the privacy boundary.
+        return True
+    if info.st_uid != os.getuid():
         return False
     return not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
 

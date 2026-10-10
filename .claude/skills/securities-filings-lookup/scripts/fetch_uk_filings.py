@@ -37,7 +37,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from naming import filing_name
+from naming import claim_name, filing_name
 from pdf_utils import save_pdf_bytes
 from net_errors import HostRefused, run
 
@@ -145,6 +145,7 @@ def main() -> None:
               f"https://data.fca.org.uk/#/nsm/nationalstoragemechanism")
         return
 
+    used_names: set[str] = set()
     for s in rows:
         date = (s.get("publication_date") or "?")[:10]
         line = f"{date}  {s.get('company','?')[:30]:<30}  {s.get('headline','?')}"
@@ -159,10 +160,14 @@ def main() -> None:
         ext = os.path.splitext(s["download_link"])[1] or ".bin"
         # NSM results carry no ticker, so the company name is the
         # identifier here; ESEF packages keep their .zip extension.
-        out = os.path.join(args.save_dir,
-                           filing_name(s.get("company", args.company),
-                                       s.get("headline", "document"), date,
-                                       ext=ext))
+        # Same-day notices from one company often share a headline
+        # ("Holding(s) in Company"); the download link tells them apart.
+        name = claim_name(used_names,
+                          filing_name(s.get("company", args.company),
+                                      s.get("headline", "document"), date,
+                                      ext=ext),
+                          os.path.basename(s["download_link"]))
+        out = os.path.join(args.save_dir, name)
         if data[:5] == b"%PDF-":
             saved = save_pdf_bytes(data, out)
         else:

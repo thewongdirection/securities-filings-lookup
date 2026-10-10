@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import errno
 import http.client
+import re
 import socket
 import ssl
 import sys
@@ -55,6 +56,17 @@ HOST_NOTES = {
     "release.tdnet.info": "TDnet serves only the last ~1 month and blocks unusual clients.",
     "api.edinet-fsa.go.jp": "EDINET needs a free API key in EDINET_API_KEY.",
 }
+
+
+# A credential that rode in on the query string and comes back inside a
+# library's error text (http.client.InvalidURL quotes the whole request path).
+_SECRET_PARAM = re.compile(
+    r"(?i)\b((?:subscription-)?key|api[_-]?key|token)=[^&\s'\")]+")
+
+
+def redact_secrets(text: str) -> str:
+    """Mask `key=...`-style credentials before the text reaches a terminal."""
+    return _SECRET_PARAM.sub(r"\1=***", text)
 
 
 def _host(url: str | None) -> str:
@@ -104,7 +116,11 @@ def _is_tunnel_block(text: str) -> bool:
 
 
 def explain(exc: BaseException) -> str:
-    """One-or-two-line explanation of a failed request."""
+    """One-or-two-line explanation of a failed request, credentials masked."""
+    return redact_secrets(_explain(exc))
+
+
+def _explain(exc: BaseException) -> str:
     if isinstance(exc, urllib.error.HTTPError):
         host = _host(getattr(exc, "url", None)) or "the server"
         note = _note_for(host)
@@ -149,6 +165,13 @@ def explain(exc: BaseException) -> str:
         if _is_tunnel_block(text):
             return PROXY_BLOCK.format(detail=text)
         return f"Network error: {text}. {FALLBACK}"
+
+    if isinstance(exc, http.client.InvalidURL):
+        # Raised before anything is sent, so the server is not at fault and
+        # retrying cannot help -- a value interpolated into the URL is bad.
+        return (f"The request URL was rejected as malformed ({exc}). That is "
+                "a bad argument, not a server problem -- check the values "
+                "passed on the command line.")
 
     if isinstance(exc, http.client.HTTPException):
         # Not an OSError, so this used to escape run() as a traceback: a

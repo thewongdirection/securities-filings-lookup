@@ -140,6 +140,14 @@ def validate(user_agent: str) -> str | None:
     if not EMAIL_RE.search(candidate):
         return ("it carries no email address, and SEC's edge returns 403 for a "
                 "User-Agent without one")
+    try:
+        candidate.encode("latin-1")
+    except UnicodeEncodeError:
+        # http.client sends header values as latin-1; anything else would
+        # fail on the first request, as a traceback, every run.
+        return ("it contains characters an HTTP header cannot carry (a name "
+                "in non-Latin script, or an accent mangled by the wrong "
+                "encoding) -- write the name in plain Latin letters")
     return None
 
 
@@ -148,7 +156,8 @@ def stored_user_agent(skill_dir: Path | None = None) -> str | None:
     for path in candidate_paths(skill_dir):
         try:
             # A name with an accent typed in a legacy shell lands here as
-            # cp1252; a decode error must not become a traceback.
+            # cp1252; a decode error must not become a traceback. The
+            # replacement character it leaves is rejected by validate().
             text = path.read_text(encoding="utf-8", errors="replace").strip()
         except (OSError, ValueError):
             continue

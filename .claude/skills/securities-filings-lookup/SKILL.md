@@ -54,7 +54,7 @@ Run the heuristic classifier (no network needed):
 python scripts/identify_venue.py <ticker>
 ```
 
-It parses common suffixes (`.HK`, `.SS`/`.SH`, `.SZ`) and bare numeric codes (HK codes are short, 1–5 digits; mainland A-share codes are 6 digits, with the prefix indicating Shanghai vs. Shenzhen vs. Beijing). Alphabetic tickers default to "US-listed."
+It parses exchange suffixes — `.HK`, `.SS`/`.SH`, `.SZ`, `.L`, `.T`, `.SI`/`.SGX`, `.DE`/`.F` — and bare codes: HK codes are short, 1–5 digits; mainland A-share codes are 6 digits, with the prefix indicating Shanghai vs. Shenzhen vs. Beijing; codes that mix letters and digits, like `D05` or `A17U`, default to SGX, except Tokyo's three-digit-plus-letter codes such as `285A`. Bare all-letter tickers default to "US-listed", and bare 3–4 digit codes default to Hong Kong although they can also be Singaporean (3 digits) or Japanese (4 digits), so the note it prints says when to confirm.
 
 ### Company names: resolve to a ticker first
 

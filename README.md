@@ -1,6 +1,6 @@
 # securities-filings-lookup
 
-A [Claude Code](https://claude.com/claude-code) skill that looks up official financial and securities filings for any stock ticker — working out where the company is actually listed, fetching from the authoritative regulator source, and saving the original documents as PDFs.
+A [Claude Code](https://claude.com/claude-code) skill that looks up official financial and securities filings for a stock ticker or company name across seven markets (US, Hong Kong, mainland China, London, Japan, Singapore, Germany) — working out where the company is actually listed, fetching from the authoritative regulator source, and saving the original documents as PDFs. Taiwan is not covered (see [below](#taiwan-twse--mops-is-not-covered)).
 
 **Covered venues:**
 
@@ -11,10 +11,10 @@ A [Claude Code](https://claude.com/claude-code) skill that looks up official fin
 | 🇨🇳 Mainland China A-shares | CNINFO (SSE + SZSE) | 年度报告, 半年度报告, 季度报告, prospectuses |
 | 🇬🇧 London | FCA National Storage Mechanism | Annual reports (ESEF), circulars, prospectuses |
 | 🇯🇵 Japan | TDnet (+ EDINET pointers) | 決算短信 (earnings), timely disclosures |
-| 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements |
+| 🇸🇬 Singapore | SGX / SGXNet | Annual reports, half-year results, circulars, SGXNet announcements (issuer lookup and document download are scripted; finding the announcement is manual) |
 | 🇩🇪 Frankfurt / Germany | Unternehmensregister / IR sites | Annual reports (documented workflow, no scraper) |
 
-For cross-listed companies the skill retrieves every covered venue's filings and says what it can't reach. Venue quirks are documented per market: modern UK annual reports are ESEF zip packages (xHTML/iXBRL), Japan's EDINET API needs a free subscription key (TDnet is keyless but keeps only ~1 month), and Germany's official repositories are browse-only so the IR-site annual report or a SEC 20-F (SAP) is the practical route.
+For cross-listed companies the skill retrieves every covered venue's filings and says what it can't reach. Venue quirks are documented per market: modern UK annual reports are ESEF zip packages (xHTML/iXBRL), Japan's EDINET API needs a free subscription key (TDnet is keyless but keeps only ~1 month), Singapore has no listing API, so you supply the SGXNet announcement and the skill pulls every document attached to it, and Germany's official repositories are browse-only so the IR-site annual report or a SEC 20-F (SAP) is the practical route.
 
 ## Install
 
@@ -170,6 +170,7 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
 /securities-filings-lookup AZN.L         # London
 /securities-filings-lookup 7203.T        # Tokyo
+/securities-filings-lookup D05.SI        # Singapore (also: D05, A17U.SI)
 /securities-filings-lookup SAP.DE        # Frankfurt / XETRA
 ```
 

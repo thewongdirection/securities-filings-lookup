@@ -37,6 +37,8 @@ forces a specific binary.
 """
 from __future__ import annotations
 
+import urllib.parse
+
 from net_errors import SetupError
 
 
@@ -54,8 +56,31 @@ SETUP_HINT = (
 )
 
 
+# What a page's third-party subresources are fetched as. The declared
+# contact is a person's address; it belongs to the regulator that asked for
+# it, not to whatever host a filing happens to hotlink an image from.
+THIRD_PARTY_UA = "securities-filings-lookup"
+
+
 def is_pdf_bytes(data: bytes) -> bool:
     return data[:5] == b"%PDF-"
+
+
+def _site(url: str) -> str:
+    """The last two host labels: sec.gov for www.sec.gov and data.sec.gov."""
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return ".".join(host.split(".")[-2:])
+
+
+def subresource_user_agent(url: str, page_url: str, user_agent: str) -> str:
+    """The User-Agent for one request the rendered page makes.
+
+    The page's own site gets the declared one. Anything else -- a logo
+    hotlinked from a company's web server, perhaps over plain http -- gets
+    a generic string, so the contact is never sent to a host it was not
+    given to.
+    """
+    return user_agent if _site(url) == _site(page_url) else THIRD_PARTY_UA
 
 
 def _bundled_chromium() -> str | None:
@@ -162,7 +187,8 @@ def render_url_to_pdf(url: str, out_path: str, wait_ms: int = 2000,
         out_path += ".pdf"
 
     def _fetch(u: str) -> tuple[bytes, str]:
-        req = urllib.request.Request(u, headers={"User-Agent": user_agent})
+        req = urllib.request.Request(u, headers={
+            "User-Agent": subresource_user_agent(u, url, user_agent)})
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read(), resp.headers.get("Content-Type", "application/octet-stream")
 

@@ -43,9 +43,10 @@ import re
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
-from naming import filing_name
+from naming import filing_name, safe_filename
 from pdf_utils import save_pdf_bytes
 from net_errors import run
 
@@ -97,6 +98,32 @@ def day_rows(date: datetime.date) -> list[tuple[str, str, str, str, str]]:
     return rows
 
 
+EDINET_API = "https://api.edinet-fsa.go.jp/api/v2/"
+
+
+def edinet_date(value: str) -> str:
+    """argparse type: a real YYYY-MM-DD date.
+
+    The value is interpolated into a request URL that also carries the API
+    key, so a malformed one must be refused here rather than reach
+    http.client, whose InvalidURL error quotes the whole path.
+    """
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError(value)
+        datetime.datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not a YYYY-MM-DD date") from None
+    return value
+
+
+def edinet_url(path: str, key: str, **params: str | int) -> str:
+    """An EDINET API URL with every query value encoded, the key included."""
+    query = urllib.parse.urlencode({**params, "Subscription-Key": key})
+    return f"{EDINET_API}{path}?{query}"
+
+
 def edinet(code: str, date: str, save_dir: str | None) -> None:
     """List (and optionally save) a date's EDINET filings for the company.
     Requires EDINET_API_KEY; keyless calls return 401 (verified live)."""
@@ -108,9 +135,7 @@ def edinet(code: str, date: str, save_dir: str | None) -> None:
               "Without it, use the EDINET web UI: "
               "https://disclosure2.edinet-fsa.go.jp")
         return
-    url = (f"https://api.edinet-fsa.go.jp/api/v2/documents.json"
-           f"?date={date}&type=2&Subscription-Key={key}")
-    data = _get(url)
+    data = _get(edinet_url("documents.json", key, date=date, type=2))
     docs = json.loads(data.decode()).get("results") or []
     sec5 = code + "0"  # EDINET secCode is the 5-digit form
     hits = [d for d in docs if (d.get("secCode") or "").startswith(code)
@@ -126,9 +151,11 @@ def edinet(code: str, date: str, save_dir: str | None) -> None:
             print(line)
             continue
         os.makedirs(save_dir, exist_ok=True)
-        pdf = _get(f"https://api.edinet-fsa.go.jp/api/v2/documents/"
-                   f"{d['docID']}?type=2&Subscription-Key={key}")
-        out = os.path.join(save_dir, f"{code}_{date}_{d['docID']}.pdf")
+        doc_id = str(d["docID"])
+        pdf = _get(edinet_url(f"documents/{urllib.parse.quote(doc_id, safe='')}",
+                              key, type=2))
+        out = os.path.join(save_dir,
+                           f"{code}_{date}_{safe_filename(doc_id)}.pdf")
         if pdf and pdf[:5] == b"%PDF-":
             save_pdf_bytes(pdf, out)
             print(f"{line}  -> {out}")
@@ -144,7 +171,7 @@ def main() -> None:
     parser.add_argument("--grep", help="Substring filter on the title")
     parser.add_argument("--limit", type=int, default=15)
     parser.add_argument("--save-dir", help="If set, download matching PDFs here")
-    parser.add_argument("--edinet-date",
+    parser.add_argument("--edinet-date", type=edinet_date,
                         help="Query EDINET (needs EDINET_API_KEY) for this "
                              "date's statutory filings instead of TDnet")
     args = parser.parse_args()

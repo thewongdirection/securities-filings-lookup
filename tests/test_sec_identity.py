@@ -75,6 +75,41 @@ class ValidationTest(unittest.TestCase):
         # "examples.com" is not "example.com".
         self.assertIsNone(sec_identity.validate("Team ops@examples.com"))
 
+    def test_a_contact_the_http_layer_cannot_send_is_refused(self):
+        # http.client encodes header values as latin-1, so these used to
+        # validate and then die on every SEC request with a traceback.
+        for contact in ("张伟 zhang@realdomain.cn",
+                        "Łukasz l@realdomain.pl",
+                        "Jos\ufffd Garcia jose@realdomain.es"):  # cp1252 misread
+            with self.subTest(contact=contact):
+                self.assertIn("HTTP header", sec_identity.validate(contact))
+
+    def test_a_latin_1_accent_is_still_accepted(self):
+        self.assertIsNone(sec_identity.validate("José Garcia jose@realdomain.es"))
+
+    def test_a_validated_contact_can_actually_be_put_on_the_wire(self):
+        import http.client
+        for contact in ("Plain Name plain@realdomain.com",
+                        "José Garcia jose@realdomain.es"):
+            with self.subTest(contact=contact):
+                self.assertIsNone(sec_identity.validate(contact))
+                connection = http.client.HTTPConnection("localhost")
+                connection.putrequest("GET", "/")
+                connection.putheader("User-Agent", contact)  # must not raise
+
+    def test_a_mis_encoded_stored_contact_is_named_not_traced_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp)
+            (skill / "SKILL.md").write_text("x", encoding="utf-8")
+            (skill / sec_identity.CONFIG_FILENAME).write_bytes(
+                "José Garcia jose@realdomain.es\n".encode("cp1252"))
+            with mock.patch.dict("os.environ", {}, clear=False):
+                import os
+                os.environ.pop(sec_identity.ENV_VAR, None)
+                with self.assertRaises(sec_identity.MissingSecContact) as caught:
+                    sec_identity.resolve(None, skill)
+        self.assertIn(sec_identity.CONFIG_FILENAME, str(caught.exception))
+
 
 class ResolutionOrderTest(unittest.TestCase):
     def setUp(self):

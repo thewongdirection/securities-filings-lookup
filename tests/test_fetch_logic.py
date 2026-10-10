@@ -7,16 +7,20 @@ are not reachable from every environment and must never gate a test run.
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
 import http.client
 import io
 import json
 import os
 import socket
 import ssl
+import subprocess
 import sys
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -152,6 +156,65 @@ class JpParsingTest(unittest.TestCase):
         self.assertIn("決算短信", title)
 
 
+class EdinetRequestTest(unittest.TestCase):
+    """EDINET's API key rides in the query string, so anything that makes
+    http.client echo the request path -- a malformed date did -- printed
+    the key into the transcript."""
+
+    KEY = "SECRETKEY123"
+
+    def test_only_real_iso_dates_are_accepted(self):
+        for good in ("2026-06-24", "2025-12-31"):
+            with self.subTest(good=good):
+                self.assertEqual(fetch_jp_filings.edinet_date(good), good)
+        for bad in ("June 24", "2026-6-4", "20260624", "2026-13-01",
+                    "2026-02-30", "2026-06-24&x=1", "", "2026-06-24 "):
+            with self.subTest(bad=bad):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    fetch_jp_filings.edinet_date(bad)
+
+    def test_every_query_value_is_encoded_the_key_included(self):
+        url = fetch_jp_filings.edinet_url(
+            "documents.json", "a&b=c d", date="2026-06-24", type=2)
+        self.assertEqual(urllib.parse.urlsplit(url).path, "/api/v2/documents.json")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertEqual(query["Subscription-Key"], ["a&b=c d"])
+        self.assertEqual(query["date"], ["2026-06-24"])
+        self.assertNotIn(" ", url)
+
+    def test_a_malformed_date_never_prints_the_key(self):
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "fetch_jp_filings.py"),
+             "7203", "--edinet-date", "June 24"],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "EDINET_API_KEY": self.KEY})
+        self.assertEqual(proc.returncode, 2)
+        self.assertNotIn(self.KEY, proc.stdout + proc.stderr)
+        self.assertIn("YYYY-MM-DD", proc.stderr)
+
+    def test_a_hostile_doc_id_stays_in_the_url_path_and_the_save_directory(self):
+        listing = json.dumps({"results": [{
+            "docID": "../evil", "secCode": "72030",
+            "filerName": "Toyota", "docDescription": "annual"}]}).encode()
+        calls = []
+
+        def fake_get(url):
+            calls.append(url)
+            return listing if len(calls) == 1 else b"%PDF-1.4\nbody"
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"EDINET_API_KEY": self.KEY}), \
+                mock.patch.object(fetch_jp_filings, "_get", fake_get), \
+                contextlib.redirect_stdout(io.StringIO()):
+            save_dir = os.path.join(tmp, "out")
+            fetch_jp_filings.edinet("7203", "2026-06-24", save_dir)
+            saved = os.listdir(save_dir)
+            self.assertEqual(len(saved), 1)
+            self.assertNotIn(os.sep, saved[0])
+            self.assertEqual(os.listdir(tmp), ["out"])
+        self.assertIn("documents/..%2Fevil?", calls[1])
+
+
 class PdfUtilsTest(unittest.TestCase):
     def setUp(self):
         # SKILL_CHROMIUM_PATH is a knob the docs tell users to set, and it
@@ -274,6 +337,41 @@ class PdfUtilsTest(unittest.TestCase):
         playwright.chromium.launch.assert_called_once_with(executable_path="/my/chrome")
 
 
+class SubresourceUserAgentTest(unittest.TestCase):
+    """The declared SEC contact is a person's address. A filing that
+    hotlinks an image from a company web server -- possibly over plain
+    http -- must not hand it to that host."""
+
+    PAGE = "https://www.sec.gov/Archives/edgar/data/1/x.htm"
+    CONTACT = "Some Person person@realdomain.com"
+
+    def _ua(self, url):
+        return pdf_utils.subresource_user_agent(url, self.PAGE, self.CONTACT)
+
+    def test_the_regulators_own_hosts_get_the_contact(self):
+        for url in ("https://www.sec.gov/images/a.gif",
+                    "https://data.sec.gov/x.json",
+                    "http://www.sec.gov/old/inline.gif"):
+            with self.subTest(url=url):
+                self.assertEqual(self._ua(url), self.CONTACT)
+
+    def test_a_third_party_host_never_sees_the_contact(self):
+        for url in ("http://cdn.company.example/logo.gif",
+                    "https://tracker.example.net/pixel.png",
+                    "https://sec.gov.evil.example/a.gif",
+                    "https://notsec.gov.example/a.gif",
+                    "data:image/gif;base64,R0lGOD"):
+            with self.subTest(url=url):
+                ua = self._ua(url)
+                self.assertEqual(ua, pdf_utils.THIRD_PARTY_UA)
+                self.assertNotIn("@", ua)
+
+    def test_the_interceptor_actually_uses_it(self):
+        # The helper is only worth having if the browser route calls it.
+        source = (ROOT / "scripts" / "pdf_utils.py").read_text(encoding="utf-8")
+        self.assertIn("subresource_user_agent(u, url, user_agent)", source)
+
+
 class SaveFilingTest(unittest.TestCase):
     def test_output_name_is_derived_from_the_url(self):
         self.assertEqual(
@@ -391,6 +489,35 @@ class NetworkErrorReportingTest(unittest.TestCase):
                 self.assertEqual(exit_.exception.code, 1)
                 self.assertNotIn("Traceback", stderr.getvalue())
                 self.assertIn("could not finish reading", stderr.getvalue())
+
+    def test_a_credential_echoed_in_an_error_is_masked(self):
+        # http.client.InvalidURL quotes the whole request path, key and all.
+        exc = http.client.InvalidURL(
+            "URL can't contain control characters. "
+            "'/api/v2/documents.json?date=June 24&type=2&Subscription-Key="
+            "SECRETKEY123' (found at least ' ')")
+        message = net_errors.explain(exc)
+        self.assertNotIn("SECRETKEY123", message)
+        self.assertIn("Subscription-Key=***", message)
+
+    def test_redaction_covers_the_usual_credential_parameters(self):
+        for param in ("Subscription-Key", "api_key", "apikey", "api-key",
+                      "key", "token"):
+            with self.subTest(param=param):
+                masked = net_errors.redact_secrets(f"GET /x?a=1&{param}=hunter2xyz&b=2")
+                self.assertNotIn("hunter2xyz", masked)
+                self.assertIn("a=1", masked)
+                self.assertIn("b=2", masked)
+
+    def test_redaction_leaves_ordinary_text_alone(self):
+        text = "monkey=banana turkey=sandwich Rate limited by sec.gov"
+        self.assertEqual(net_errors.redact_secrets(text), text)
+
+    def test_a_malformed_url_is_a_bad_argument_not_a_transient_cut(self):
+        message = net_errors.explain(http.client.InvalidURL("bad path"))
+        self.assertIn("malformed", message)
+        self.assertNotIn("transient", message)
+        self.assertNotIn("retry once", message)
 
     def test_a_truncated_reply_is_described_as_transient(self):
         message = net_errors.explain(http.client.IncompleteRead(b"1234"))

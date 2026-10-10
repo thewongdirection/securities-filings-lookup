@@ -474,15 +474,18 @@ class JapanDirectoryTest(unittest.TestCase):
         import resolve_name
         if importlib.util.find_spec("openpyxl") is None:
             self.skipTest("openpyxl not installed")
+        # Built once: an .xlsx embeds its creation time to the second, so two
+        # builds of "the same" workbook differ whenever a second boundary falls
+        # between them -- about one run in a few hundred.
+        workbook = _minimal_xlsx()
         stored = []
         with mock.patch.object(resolve_name.disk_cache, "is_fresh",
                                return_value=False), \
                 mock.patch.object(resolve_name.disk_cache, "store",
                                   lambda path, data: stored.append(data)), \
-                mock.patch.object(resolve_name, "_get",
-                                  return_value=_minimal_xlsx()):
+                mock.patch.object(resolve_name, "_get", return_value=workbook):
             resolve_name.search_jp("Widget")
-        self.assertEqual(stored, [_minimal_xlsx()])
+        self.assertEqual(stored, [workbook])
 
 
 def _minimal_xlsx() -> bytes:

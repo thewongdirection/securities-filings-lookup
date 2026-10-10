@@ -448,6 +448,43 @@ class JapanDirectoryTest(unittest.TestCase):
         self.assertEqual(rows, [("jp", "1234.T", "Widget Corporation")])
 
 
+    def test_a_refusal_page_is_never_cached_as_the_directory(self):
+        # JPX answering 200 with HTML used to be stored before openpyxl had
+        # opened it, so every lookup for the next day re-read, and failed on,
+        # the poisoned file.
+        import importlib.util
+
+        import resolve_name
+        if importlib.util.find_spec("openpyxl") is None:
+            self.skipTest("openpyxl not installed")
+        stored = []
+        with mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                               return_value=False), \
+                mock.patch.object(resolve_name.disk_cache, "store",
+                                  lambda path, data: stored.append(path)), \
+                mock.patch.object(resolve_name, "_get",
+                                  return_value=b"<html>Access denied</html>"):
+            rows = resolve_name.search_jp("Widget")
+        self.assertEqual(rows[0][:2], ("jp", "ERROR"))
+        self.assertEqual(stored, [])
+
+    def test_a_workbook_that_opened_is_cached(self):
+        import importlib.util
+
+        import resolve_name
+        if importlib.util.find_spec("openpyxl") is None:
+            self.skipTest("openpyxl not installed")
+        stored = []
+        with mock.patch.object(resolve_name.disk_cache, "is_fresh",
+                               return_value=False), \
+                mock.patch.object(resolve_name.disk_cache, "store",
+                                  lambda path, data: stored.append(data)), \
+                mock.patch.object(resolve_name, "_get",
+                                  return_value=_minimal_xlsx()):
+            resolve_name.search_jp("Widget")
+        self.assertEqual(stored, [_minimal_xlsx()])
+
+
 def _minimal_xlsx() -> bytes:
     """A one-row workbook in JPX's column layout, as bytes."""
     import io

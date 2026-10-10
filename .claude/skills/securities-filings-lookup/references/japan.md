@@ -9,7 +9,7 @@ Two official systems split Japan's disclosures:
 
 ## Ticker format
 
-4-digit codes (Toyota = 7203), suffix `.T` (also seen: `.JP`). **Bare 4-digit codes are ambiguous with Hong Kong** — the classifier assumes HK and says so; confirm. The same shape is also a Taiwanese code, which this skill does not cover (see README).
+4-character codes: four digits for most issuers (Toyota = 7203), or three digits and a letter for listings since 2024 (Kioxia = `285A`, which `identify_venue.py` assumes is Tokyo and says so). Suffix `.T` (also seen: `.JP`). **Bare 4-digit codes are ambiguous with Hong Kong** — the classifier assumes HK and says so; confirm. The same shape is also a Taiwanese code, which this skill does not cover (see README).
 
 ## Script (TDnet, needs real network access)
 

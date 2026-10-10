@@ -16,9 +16,11 @@ Sources (all free, official):
 - China:   CNINFO topSearch (matches Chinese names/pinyin; English
            names usually don't match -- expect misses for English input)
 - London:  FCA NSM search, distinct company values from recent hits
+- Japan:   JPX's English listed-company directory (needs openpyxl)
+- Singapore: SGX's securities directory
 
-A name can legitimately resolve in several venues at once (TSMC ->
-TSM ADR on EDGAR + 2330 on TWSE). Present the candidates and apply
+A name can legitimately resolve in several venues at once (Ping An ->
+601318 on CNINFO + 2318.HK). Present the candidates and apply
 SKILL.md's confirmation rule; don't silently pick one.
 """
 from __future__ import annotations
@@ -165,20 +167,24 @@ def search_jp(q: str) -> list[tuple[str, str, str]]:
         return [("jp", "SKIPPED",
                  "pip install openpyxl to enable Japan name lookup")]
     cache = disk_cache.cache_path("jpx_companies_e.xlsx")
+    downloaded = None
     try:
         if disk_cache.is_fresh(cache):
             source = cache
         else:
-            data = _get(JPX_DIRECTORY_URL, timeout=90)
-            disk_cache.store(cache, data)
-            # Read the bytes in hand, not the file just written: store()
+            downloaded = _get(JPX_DIRECTORY_URL, timeout=90)
+            # Read the bytes in hand, not a file just written: store()
             # swallows write failures by design, and reading back a cache
             # that never landed would fail the lookup that had already
             # succeeded.
-            source = io.BytesIO(data)
+            source = io.BytesIO(downloaded)
         book = openpyxl.load_workbook(source, read_only=True, data_only=True)
     except Exception as e:  # noqa: BLE001 - one venue failing is not fatal
         return [("jp", "ERROR", str(e))]
+    if downloaded is not None:
+        # Only a workbook that opened is worth keeping: a refusal page cached
+        # before this point would be served, and fail, for the whole TTL.
+        disk_cache.store(cache, downloaded)
     ql = q.lower()
     out = []
     try:

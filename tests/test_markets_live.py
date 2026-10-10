@@ -3,7 +3,7 @@
 Every supported market, twenty-five randomly chosen issuers each, against
 the live regulators.
 
-Opt-in: these tests talk to SEC, CNINFO, TWSE, TDnet, the FCA and HKEX, so
+Opt-in: these tests talk to SEC, CNINFO, HKEX, TDnet, the FCA and SGX, so
 they are skipped unless SKILL_LIVE_TESTS=1. The rest of the suite stays
 offline and deterministic.
 

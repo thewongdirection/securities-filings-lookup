@@ -63,7 +63,7 @@ Settings the skill remembers (`sec_user_agent.txt`, `save_location.txt`) live un
   SEC's primary documents are HTML; the skill prints them to PDF with a real headless browser. HK and China filings are native PDFs and need nothing extra.
   Where a Chromium is already installed but Playwright pins a different build (Claude Code on the web), the scripts fall back to the browser under `PLAYWRIGHT_BROWSERS_PATH`; `SKILL_CHROMIUM_PATH` forces a specific binary.
 - Optional: `pip install pypdf` — used to verify saved PDFs and to extract text when translating Chinese filing summaries.
-- **For issuers whose TLS chain is incomplete** (various IR-site downloads): `pip install certifi` — some hosts' chains are missing from default trust stores; the scripts pick up certifi automatically.
+- **For issuers whose TLS chain is incomplete** (various IR-site downloads): `pip install certifi` — some hosts' chains are missing from default trust stores; `save_filing.py`, the Japan and London fetchers and the name resolver pick it up automatically.
 - **For Japan name lookup**: `pip install openpyxl` (JPX's company directory is an .xlsx; it used to be .xls, and that URL now 404s). For Japanese statutory filings via EDINET, register a free API key at api.edinet-fsa.go.jp and set `EDINET_API_KEY`; TDnet needs nothing.
 
 ## Network access (cloud containers, proxies, locked-down networks)
@@ -166,7 +166,7 @@ Invoke with a ticker, in any common format:
 /securities-filings-lookup MSFT          # US
 /securities-filings-lookup BRK.B         # US class shares (BRK-B also works)
 /securities-filings-lookup 0700.HK       # Hong Kong (also: 700, 9988.HK)
-/securities-filings-lookup 600519:SS     # Shanghai (also: 600519, 600519.SS)
+/securities-filings-lookup 600519.SS     # Shanghai (also: 600519)
 /securities-filings-lookup 300308.SZ     # Shenzhen / ChiNext
 /securities-filings-lookup AZN.L         # London
 /securities-filings-lookup 7203.T        # Tokyo
@@ -201,7 +201,7 @@ The save folder is **remembered per machine** in `save_location.txt` next to `SK
 2. The folder in `save_location.txt`
 3. If neither exists yet, the skill **asks you once** and records the answer
 
-Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2025-07-30.pdf`, `600519_00_贵州茅台2025年年度报告.pdf`) — so the folder stays sortable.
+Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2025-07-30.pdf`, `600519_贵州茅台2025年年度报告_2026-04-01.pdf`) — so the folder stays sortable.
 
 ## Run it from your phone
 
@@ -214,7 +214,11 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 - `scripts/identify_venue.py` — offline ticker→venue classifier (suffixes, bare codes, class shares)
 - `scripts/fetch_us_filings.py` — SEC EDGAR listing + PDF save (handles SEC's gzip responses, bot detection, rate-limit caching)
 - `scripts/fetch_cn_filings.py` — CNINFO listing + PDF save (handles the `code,orgId` query requirement and server-side title search)
+- `scripts/fetch_uk_filings.py` / `scripts/fetch_jp_filings.py` / `scripts/fetch_sg_filings.py` — London (FCA NSM), Tokyo (TDnet + EDINET) and Singapore (SGXNet) listing + save
+- `scripts/resolve_name.py` — company name → candidate tickers, from each venue's own directory
 - `scripts/save_filing.py` / `scripts/pdf_utils.py` — save any filing URL as the original PDF
+- `scripts/sec_identity.py` — the SEC contact address: where it is read from, how it is validated
+- `scripts/naming.py` / `scripts/disk_cache.py` — safe, collision-free file names, and the per-user directory cache
 - `references/` — per-venue mechanics, URL patterns, and documented dead ends so they don't get re-tried
 - `scripts/net_errors.py` — turns rate limits, blocked hosts and TLS failures into one plain line instead of a traceback
 - `scripts/sync_project_skill.py` — mirrors the skill into `.claude/skills/` so the two copies can't drift
@@ -226,20 +230,19 @@ Files are named identifiably — `{ticker}_{form}_{date}.pdf` (e.g. `MSFT_10-K_2
 python -m unittest discover -s tests      # every offline regression test
 python scripts/sync_project_skill.py      # after editing SKILL.md / scripts / references
 
-# all seven markets against the live regulators, 10 issuers sampled per market
+# all seven markets against the live regulators, 25 issuers sampled per market
 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live -v
 SKILL_LIVE_SEED=7 SKILL_LIVE_TESTS=1 python -m unittest tests.test_markets_live
 ```
 
-`tests/test_markets_live.py` samples ten issuers per venue from a larger pool on
+`tests/test_markets_live.py` samples twenty-five issuers per venue from a larger pool on
 each run (the sample is printed; `SKILL_LIVE_SEED` makes a run reproducible) and
 asserts what a pass means for that venue: filings returned where the venue
 answers, "the window is empty" stated where TDnet's ~1 month has nothing, and the
-refusal named in its own words where a venue declines this client (TWSE from a
-datacentre IP) or its endpoint has been retired upstream (the FCA's NSM search
-index). No outcome may arrive as a traceback. It is skipped without
+retirement named in its own words where an endpoint has been retired upstream
+(the FCA's NSM search index). No outcome may arrive as a traceback. It is skipped without
 `SKILL_LIVE_TESTS=1`, so the default suite stays offline and deterministic.
 
 The repo root is the canonical skill; `.claude/skills/securities-filings-lookup/` is a generated mirror that lets Claude Code on the web load it as a project skill. `tests/test_skill_layout.py` fails if the two drift, so run the sync script before committing.
 
-The tests are pure standard library and never touch a regulator's server: network responses are stubbed. Anything that needs live access to SEC/CNINFO/HKEX/SGX and the other regulators belongs in a manual check, not the suite.
+The default suite is pure standard library and offline: network responses are stubbed. Only the opt-in live suite above talks to the regulators, and anything else that needs live access belongs in a manual check, not the default run.

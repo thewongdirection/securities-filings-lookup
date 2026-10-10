@@ -10,6 +10,7 @@ Primary source: **CNINFO** (`cninfo.com.cn`, 巨潮资讯网 / "Juchao"), the CS
 |---|---|---|
 | 600, 601, 603, 605 | Shanghai (SSE) | Main board |
 | 688 | Shanghai (SSE) | STAR Market (科创板) |
+| 900 | Shanghai (SSE) | B-shares (B股, quoted in US dollars) |
 | 000, 001 | Shenzhen (SZSE) | Main board |
 | 002, 003 | Shenzhen (SZSE) | Main board (formerly SME board) |
 | 300, 301 | Shenzhen (SZSE) | ChiNext (创业板) |

@@ -40,8 +40,9 @@ class VenueClassificationTest(unittest.TestCase):
                                  "singapore")
 
     def test_mixed_letter_digit_codes_are_claimed_for_singapore(self):
-        # A shape no other venue here uses: US tickers are pure letters,
-        # HK codes pure digits, Tokyo codes four digits.
+        # The default guess for a shape US tickers (pure letters) and HK
+        # codes (pure digits) do not use. Tokyo's three-digit-plus-letter
+        # codes are carved out first -- see test_identify_venue.
         for code in ("D05", "Z74", "C6L", "A17U", "5E2", "O39"):
             with self.subTest(code=code):
                 self.assertEqual(identify_venue.identify(code)["venue"],

@@ -107,6 +107,34 @@ CN_RESPONSE = {
 }
 
 
+class TickerDirectoryTest(unittest.TestCase):
+    """The ticker->CIK download is served from www.sec.gov, the host that
+    actually gets blocked -- with a 200 and an HTML page."""
+
+    def test_a_block_page_is_a_refusal_not_a_json_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(fetch_us_filings.disk_cache, "cache_dir",
+                                  return_value=tmp), \
+                mock.patch.object(fetch_us_filings, "_get",
+                                  return_value=b"<html>Request Rate Threshold</html>"):
+            with self.assertRaises(net_errors.HostRefused) as caught:
+                fetch_us_filings.resolve_cik("AAPL")
+            self.assertEqual(os.listdir(tmp), [],
+                             "a refusal page must never be cached as the directory")
+        self.assertIn("not JSON", str(caught.exception))
+
+    def test_a_good_directory_still_resolves_and_is_cached(self):
+        body = json.dumps({"0": {"cik_str": 320193, "ticker": "AAPL",
+                                 "title": "Apple Inc."}}).encode()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(fetch_us_filings.disk_cache, "cache_dir",
+                                  return_value=tmp), \
+                mock.patch.object(fetch_us_filings, "_get", return_value=body):
+            self.assertEqual(fetch_us_filings.resolve_cik("aapl"),
+                             (320193, "Apple Inc."))
+            self.assertEqual(os.listdir(tmp), ["sec_company_tickers.json"])
+
+
 class CnFilingSelectionTest(unittest.TestCase):
     def _fetch(self, kind, limit=10):
         payload = json.dumps(CN_RESPONSE).encode()
@@ -325,6 +353,26 @@ class PdfUtilsTest(unittest.TestCase):
             # "chromium-999" sorts after "chromium-1194" as text.
             self.assertIn("chromium-1194", found)
 
+    def test_the_build_is_found_whatever_the_platform_layout(self):
+        # On macOS the binary sits four levels down inside Chromium.app, so
+        # the directory two above it is "Contents" and every build scored -1.
+        layouts = {
+            "linux": "chromium-{b}/chrome-linux/chrome",
+            "mac": "chromium-{b}/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+            "windows": "chromium-{b}/chrome-win/chrome.exe",
+        }
+        for name, layout in layouts.items():
+            with self.subTest(platform=name), \
+                    tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "pw-9999"  # digits in the root must not count
+                for build in (999, 1194):
+                    binary = root / layout.format(b=build)
+                    binary.parent.mkdir(parents=True)
+                    binary.write_text("x", encoding="utf-8")
+                with mock.patch.dict("os.environ",
+                                     {"PLAYWRIGHT_BROWSERS_PATH": str(root)}):
+                    self.assertIn("chromium-1194", pdf_utils._bundled_chromium())
+
     def test_bundled_chromium_is_none_without_a_browsers_path(self):
         with mock.patch.dict("os.environ", {"PLAYWRIGHT_BROWSERS_PATH": "/nope/nowhere"}):
             self.assertIsNone(pdf_utils._bundled_chromium())
@@ -335,6 +383,61 @@ class PdfUtilsTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {pdf_utils.CHROMIUM_PATH_ENV: "/my/chrome"}):
             pdf_utils._launch_chromium(playwright)
         playwright.chromium.launch.assert_called_once_with(executable_path="/my/chrome")
+
+
+class RenderFailureTest(unittest.TestCase):
+    """A page the browser cannot load must be a skippable fetch failure:
+    Playwright's own exception is neither an OSError nor anything run()
+    catches, so it used to end a batch as a traceback."""
+
+    class FakePlaywrightError(Exception):
+        pass
+
+    def _render(self, goto_error):
+        import contextlib
+        import types
+
+        page = mock.Mock()
+        page.goto.side_effect = goto_error
+        browser = mock.Mock()
+        browser.new_page.return_value = page
+        sync_api = types.ModuleType("playwright.sync_api")
+        sync_api.Error = self.FakePlaywrightError
+        sync_api.sync_playwright = lambda: contextlib.nullcontext(mock.Mock())
+        modules = {"playwright": types.ModuleType("playwright"),
+                   "playwright.sync_api": sync_api}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(sys.modules, modules), \
+                mock.patch.object(pdf_utils, "_launch_chromium",
+                                  return_value=browser):
+            try:
+                pdf_utils.render_url_to_pdf("https://www.sec.gov/x.htm",
+                                            os.path.join(tmp, "x.pdf"))
+            finally:
+                browser.close.assert_called_once()  # even when it fails
+
+    def test_a_navigation_failure_is_a_render_error(self):
+        with self.assertRaises(pdf_utils.RenderError) as caught:
+            self._render(self.FakePlaywrightError("Timeout 120000ms exceeded"))
+        self.assertIsInstance(caught.exception, OSError)
+        self.assertIn("Timeout 120000ms exceeded", str(caught.exception))
+        self.assertIn("https://www.sec.gov/x.htm", str(caught.exception))
+
+    def test_a_render_error_is_reported_plainly_by_run(self):
+        def main():
+            raise pdf_utils.RenderError("the browser could not render x")
+
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+            net_errors.run(main)
+        self.assertNotIn("Traceback", stderr.getvalue())
+        self.assertIn("could not render", stderr.getvalue())
+
+    def test_a_genuine_bug_is_not_swallowed(self):
+        # Only Playwright's own errors are translated; anything else keeps
+        # its traceback so it can be debugged.
+        with self.assertRaises(ZeroDivisionError):
+            self._render(ZeroDivisionError("bug"))
 
 
 class SubresourceUserAgentTest(unittest.TestCase):
